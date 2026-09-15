@@ -11,6 +11,7 @@
 	- Sets delivery cadence, batch size and retry behaviour
 	- Sets how long each kind of burst is folded before release
 	- Caps what is watched and how much of a value is logged
+	- Sets how much recent activity the panel keeps on show
 	- Lists the properties read ahead of time, so a change knows its old value
 	- Lists the classes the engine maintains rather than the user
 	- Lists the services holding project content
@@ -28,7 +29,7 @@ local Config = {}
 	Stamped on every batch so the collector can tell which build a machine is
 	running. Raise it whenever the event shape changes.
 ]]
-Config.VERSION = "1.3.0"
+Config.VERSION = "1.4.0"
 
 -- | Branding | --
 --[[
@@ -84,6 +85,7 @@ Config.SCRIPT_EDIT_COALESCE_SECONDS = 10
 Config.EDITOR_TYPING_WINDOW_SECONDS = 5
 Config.LOCAL_ACTIVITY_WINDOW_SECONDS = 3
 Config.CUT_PASTE_WINDOW_SECONDS = 60
+Config.DELETE_KEY_WINDOW_SECONDS = 1
 
 -- | Limits | --
 Config.MAX_WATCHED_DESCENDANTS = 200
@@ -92,6 +94,7 @@ Config.MAX_STRUCTURE_ROWS_PER_BURST = 50
 Config.MAX_VALUE_CHARS = 120
 Config.MAX_TARGET_CHARS = 300
 Config.SCRIPT_TEXT_PREVIEW_CHARS = 200
+Config.FEED_LENGTH = 1000
 
 -- | Alarms | --
 Config.BULK_WINDOW_SECONDS = 10

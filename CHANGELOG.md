@@ -10,6 +10,29 @@ as a new version before the plugin is distributed.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-16
+
+### Added
+
+- Alert rules, configured by the supervisor in a new `Rules` tab: mass deletion, bulk script rewrites, changes under protected paths, silent machines, contradicting reports, missing events and outdated plugins. Each has its own switch, thresholds, path scope and cooldown, and is emailed to `alertEmail` in `Config`.
+- Every event carries a number within its session (`seq` column). Numbers that never arrive are recorded in a new `Gaps` tab and alerted at once; rows that arrived and were later removed from `Events` are found by a nightly audit.
+- `Daily` tab, rebuilt every night: per person per day, the places and sessions, first and last event, active minutes, changes, creations, deletions, property changes, scripts edited, characters typed and unattended changes.
+- Retention. Events older than `retentionDays` (default 180) move to a monthly archive spreadsheet before leaving `Events`.
+- `setup` installs the collector's tabs and triggers in one run; `testEmail` proves the alert address.
+- The panel is rebuilt in the Studio theme's colours: a grid of rounded tiles (Status, Version, Last Sync, Queue, and Studio when the build names one), a problem card that appears only when something is wrong, and an announcement card that is always shown, all beside a list of this session's recorded events, up to 1000. Wide panels put them side by side, narrow ones stack them. A short recording notice sits beneath the list.
+- Deleting with the Delete or Backspace key is recorded at once, instead of being held back while a paste could still turn it into a move. Undoing it is recorded as a restore.
+- The installers try the collector three times before giving up, since Apps Script turns away good requests for minutes at a time.
+
+### Changed
+
+- Every message the plugin shows is in English.
+- The alert address moves from the `ALERT_EMAIL` constant to `alertEmail` in the `Config` tab, and `SILENT_MINUTES` becomes `windowMinutes` on the `silentMachine` rule.
+
+### Fixed
+
+- A batch on its way to the collector when Studio closed, or the plugin reloaded, was left out of the saved queue and lost. It is now saved with the rest, and stored twice rather than never if it had already landed.
+- A retried batch could carry events that arrived during the failed attempt under the same identity. If the first attempt had in fact been stored, the collector dismissed the whole retry as a duplicate and those extra events were lost. A retry now resends exactly what the first attempt sent.
+
 ## [1.3.0] - 2026-09-15
 
 ### Added
@@ -124,7 +147,8 @@ as a new version before the plugin is distributed.
 - Google Sheet collector with `Events` and `Heartbeat` tabs, readable summaries, cross-machine fingerprints, formula injection protection, and an hourly silent-machine email alert.
 - `build.py` to build the plugin without a Roblox toolchain.
 
-[Unreleased]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.0.0...v1.1.0

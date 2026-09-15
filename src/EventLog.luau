@@ -8,6 +8,7 @@
 	- Records one event reported as it happens
 	- Records one event folded from a burst, keeping its own verdict
 	- Names the change transaction that later events belong to
+	- Tells whoever is listening about every event recorded
 
 	Note: every watcher reports through here, so none can invent its own event
 	shape.
@@ -19,6 +20,7 @@ local RunService = game:GetService("RunService")
 
 -- | Modules | --
 local Authorship = require(script.Parent.Authorship)
+local Safe = require(script.Parent.Safe)
 local Transport = require(script.Parent.Transport)
 
 -- | Types | --
@@ -40,9 +42,22 @@ export type Detail = {
 local EventLog = {}
 
 local recordingLabel = ""
+local writeListeners = {}
 
 
 -- // FUNCTIONS // --
+--[[
+	Queues one finished event and tells every listener about it.
+]]
+local function record(event: { [string]: any })
+	Transport.Push(event)
+	Authorship.Hold(event)
+
+	for _, listener in writeListeners do
+		Safe.Call(listener, event)
+	end
+end
+
 --[[
 	Reports whether the session is being edited or played.
 ]]
@@ -106,8 +121,7 @@ function EventLog.Write(kind: string, target: string, detail: Detail?)
 		end
 	end
 
-	Transport.Push(event)
-	Authorship.Hold(event)
+	record(event)
 end
 
 --[[
@@ -136,8 +150,16 @@ function EventLog.WriteFolded(kind: string, target: string, entry: { [string]: a
 		event[key] = value
 	end
 
-	Transport.Push(event)
-	Authorship.Hold(event)
+	record(event)
+end
+
+--[[
+	Subscribes to every event recorded from now on.
+
+	@param listener ({[string]: any}) -> () -- called once per event
+]]
+function EventLog.OnWritten(listener: ({ [string]: any }) -> ())
+	table.insert(writeListeners, listener)
 end
 
 return EventLog

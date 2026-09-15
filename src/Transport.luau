@@ -5,6 +5,7 @@
 	that delivery.
 
 	- Stamps each event with the place, session and user it happened in
+	- Numbers each event within its session, so a missing one can be noticed
 	- Queues events and discards the oldest only when full
 	- Delivers in batches, retrying with a widening back-off
 	- Holds delivery on request, while still reporting the machine as alive
@@ -54,9 +55,12 @@ local sending = false
 local persistedAnything = false
 local paused = false
 local lastHeartbeatClock = -math.huge
+local sequence = 0
 
 local sessionId = HttpService:GenerateGUID(false)
 local pendingBatchId = ""
+local pendingBatchSize = 0
+local sendingBatch: { any } = {}
 local placeName = game.Name
 local placeNameResolved = false
 local userId = Safe.Value(function()
@@ -138,11 +142,14 @@ local function restoreQueue(plugin: Plugin)
 		queue = restored
 	end
 
-	local storedBatchId = Safe.Value(function()
+	local storedBatch = Safe.Value(function()
 		return plugin:GetSetting(Config.SETTING_KEY_BATCH)
 	end)
-	if typeof(storedBatchId) == "string" then
-		pendingBatchId = storedBatchId
+	local storedId, storedSize = if typeof(storedBatch) == "string" then storedBatch:match("^(.+)|(%d+)$") else nil
+	local size = tonumber(storedSize)
+	if storedId and size and size > 0 and size <= #queue then
+		pendingBatchId = storedId
+		pendingBatchSize = size
 	end
 
 	Safe.Call(function()
@@ -317,17 +324,20 @@ end
 	oldest go, and the batch identity naming them goes with them.
 ]]
 function Transport.Push(event: { [string]: any })
+	sequence += 1
+
 	event.placeId = game.PlaceId
 	event.placeName = placeName
 	event.sessionId = sessionId
 	event.userId = userId
+	event.seq = sequence
 
 	if #queue >= Config.QUEUE_CAPACITY then
 		table.remove(queue, 1)
 		droppedCount += 1
 		pendingBatchId = ""
 		health.Healthy = false
-		health.Reason = string.format("Queue penuh, %d event terbuang", droppedCount)
+		health.Reason = string.format("Queue full, %d events discarded", droppedCount)
 	end
 	table.insert(queue, event)
 	publishHealth()
@@ -362,9 +372,17 @@ function Transport.Flush(force: boolean?)
 		resolvePlaceName()
 	end
 
-	local batchSize = math.min(#queue, Config.BATCH_LIMIT)
-	local batch = table.move(queue, 1, batchSize, 1, {})
-	queue = table.move(queue, batchSize + 1, #queue, 1, {})
+	if pendingBatchId ~= "" and pendingBatchSize > #queue then
+		pendingBatchId = ""
+	end
+	if pendingBatchId == "" then
+		pendingBatchId = HttpService:GenerateGUID(false)
+		pendingBatchSize = math.min(#queue, Config.BATCH_LIMIT)
+	end
+
+	local batch = table.move(queue, 1, pendingBatchSize, 1, {})
+	queue = table.move(queue, pendingBatchSize + 1, #queue, 1, {})
+	sendingBatch = batch
 
 	for _, event in batch do
 		if event.placeId == game.PlaceId then
@@ -372,13 +390,12 @@ function Transport.Flush(force: boolean?)
 		end
 	end
 
-	if pendingBatchId == "" then
-		pendingBatchId = HttpService:GenerateGUID(false)
-	end
-
 	local success, reason = deliver(batch, pendingBatchId)
+	sendingBatch = {}
+
 	if success then
 		pendingBatchId = ""
+		pendingBatchSize = 0
 		markSuccess()
 	else
 		local arrivedDuringSend = queue
@@ -412,8 +429,9 @@ end
 
 --[[
 	Keeps undelivered activity, and the batch identity it belongs to, where the
-	next session can find both. The identity is dropped while a send is open,
-	since the snapshot then holds none of the events it names.
+	next session can find both. A batch still on its way is kept too, without
+	its identity: if it did land, the next session stores it twice rather than
+	never.
 
 	@param force boolean? -- persist without waiting for the interval
 ]]
@@ -423,7 +441,13 @@ function Transport.Persist(plugin: Plugin, force: boolean?)
 	end
 	lastPersistClock = os.clock()
 
-	if #queue == 0 then
+	local snapshot = queue
+	if sending and #sendingBatch > 0 then
+		snapshot = table.move(sendingBatch, 1, #sendingBatch, 1, {})
+		table.move(queue, 1, #queue, #snapshot + 1, snapshot)
+	end
+
+	if #snapshot == 0 then
 		if persistedAnything then
 			persistedAnything = false
 			Safe.Call(function()
@@ -435,17 +459,21 @@ function Transport.Persist(plugin: Plugin, force: boolean?)
 	end
 
 	local encoded = Safe.Value(function()
-		return HttpService:JSONEncode(queue)
+		return HttpService:JSONEncode(snapshot)
 	end)
 	if typeof(encoded) ~= "string" then
-		warn(string.format("%s: %d queued events could not be kept for the next session", Config.DISPLAY_NAME, #queue))
+		warn(string.format("%s: %d queued events could not be kept for the next session", Config.DISPLAY_NAME, #snapshot))
 		return
 	end
+
+	local batchSetting = if sending or pendingBatchId == ""
+		then ""
+		else string.format("%s|%d", pendingBatchId, pendingBatchSize)
 
 	persistedAnything = true
 	Safe.Call(function()
 		plugin:SetSetting(Config.SETTING_KEY_QUEUE, encoded)
-		plugin:SetSetting(Config.SETTING_KEY_BATCH, if sending then "" else pendingBatchId)
+		plugin:SetSetting(Config.SETTING_KEY_BATCH, batchSetting)
 	end)
 end
 

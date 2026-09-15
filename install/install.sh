@@ -84,7 +84,18 @@ COLLECTOR_CURL=(curl -fsSL -c "$COOKIE_JAR" -b "$COOKIE_JAR")
 # rather than a machine that silently never reports.
 printf '\n'
 step 'Memeriksa collector...'
-CHECK="$("${COLLECTOR_CURL[@]}" --max-time 30 "$COLLECTOR_URL?token=$ENCODED_TOKEN" || true)"
+# Apps Script turns away good requests for minutes at a time, so a failed
+# check is tried again before it is believed.
+for ATTEMPT in 1 2 3; do
+	CHECK="$("${COLLECTOR_CURL[@]}" --max-time 30 "$COLLECTOR_URL?token=$ENCODED_TOKEN" || true)"
+	case "$CHECK" in
+		*'"ok":'*) break ;;
+	esac
+	if [ "$ATTEMPT" -lt 3 ]; then
+		step 'Collector belum menjawab. Mencoba lagi dalam 10 detik...'
+		sleep 10
+	fi
+done
 case "$CHECK" in
 	*'"ok":true'*) step 'Collector menjawab, token diterima.' ;;
 	*'bad token'*) fail 'Collector menolak token. Periksa token, atau minta yang terbaru ke PM.' ;;

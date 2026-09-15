@@ -10,16 +10,22 @@
 	- Folds a subtree arriving or leaving at once into one row for its root
 	- Reports an instance leaving one place and arriving in another as a move
 	- Recognises a cut followed by a paste of the same content as a move
+	- Reports a deletion made with a delete key at once, and an undo of it as a restore
 	- Caps how many rows one burst can produce, counting the rest
 	- Lists the watched services this place actually has
 	- Announces instances arriving and leaving to watchers that track them
 
 	Note: a removal is held back briefly, because a paste arriving later is the
-	only thing that tells a cut apart from a deletion.
+	only thing that tells a cut apart from a deletion. A delete key pressed just
+	before settles that at once.
 ]]
 
 -- // VARIABLES // --
+-- | Services | --
+local UserInputService = game:GetService("UserInputService")
+
 -- | Modules | --
+local Authorship = require(script.Parent.Parent.Authorship)
 local Bin = require(script.Parent.Parent.Bin)
 local Config = require(script.Parent.Parent.Config)
 local EventLog = require(script.Parent.Parent.EventLog)
@@ -34,6 +40,7 @@ type Row = {
 	className: string,
 	nested: number,
 	paired: boolean,
+	written: boolean?,
 	signature: string?,
 	epoch: number,
 	clock: number,
@@ -53,6 +60,11 @@ type Burst = {
 -- | Constants | --
 local SIGNATURE_SAMPLE = 50
 
+local DELETE_KEYS = {
+	[Enum.KeyCode.Delete] = true,
+	[Enum.KeyCode.Backspace] = true,
+}
+
 -- | State Management | --
 local Structure = {}
 
@@ -64,6 +76,7 @@ local removalListeners = {}
 local bursts: { [string]: Burst } = {}
 local held: { Row } = {}
 local closeScheduled = false
+local lastDeleteKeyClock = -math.huge
 
 
 -- // FUNCTIONS // --
@@ -148,7 +161,8 @@ end
 	Pairs an arrival with a removal still held back, if one matches.
 
 	The same instance coming back is a restore or a move; different instances
-	with identical content are a paste of what was cut.
+	with identical content are a paste of what was cut. A removal already
+	reported as a deletion can only come back as itself.
 
 	@return boolean -- whether the arrival was reported as part of a pair
 ]]
@@ -157,6 +171,9 @@ local function claimHeld(arrival: Row): boolean
 
 	for index, departure in held do
 		local sameInstance = rawequal(departure.instance, arrival.instance)
+		if departure.written and not sameInstance then
+			continue
+		end
 		if not sameInstance then
 			signature = signature or signatureOf(arrival.instance, arrival.nested)
 			if departure.signature ~= signature or departure.target == arrival.target then
@@ -192,6 +209,9 @@ local function releaseHeld(force: boolean?)
 		end
 
 		table.remove(held, index)
+		if row.written then
+			continue
+		end
 		EventLog.WriteFolded("removed", row.target, {
 			_epoch = row.epoch,
 			_clock = row.clock,
@@ -253,9 +273,14 @@ local function closeBursts()
 
 	if removed then
 		for _, departure in removed.rows do
-			if not departure.paired then
-				table.insert(held, departure)
+			if departure.paired then
+				continue
 			end
+			if os.clock() - lastDeleteKeyClock <= Config.DELETE_KEY_WINDOW_SECONDS then
+				writeRow("removed", departure, { operation = "deleteKey" })
+				departure.written = true
+			end
+			table.insert(held, departure)
 		end
 	end
 
@@ -408,6 +433,13 @@ end
 	Begins reporting structural change.
 ]]
 function Structure.Start()
+	bin:Add(UserInputService.InputBegan:Connect(Safe.Handler("InputBegan", function(input: InputObject)
+		if DELETE_KEYS[input.KeyCode] and not UserInputService:GetFocusedTextBox() then
+			lastDeleteKeyClock = os.clock()
+			Authorship.Prove()
+		end
+	end)))
+
 	for _, root in Structure.Roots() do
 		bin:Add(root.DescendantAdded:Connect(Safe.Handler("DescendantAdded", function(descendant: Instance)
 			gather("added", root, descendant, Naming.PathOf(descendant))

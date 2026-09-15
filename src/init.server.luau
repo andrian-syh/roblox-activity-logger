@@ -12,6 +12,7 @@
 	- Follows the supervisor in holding and releasing delivery
 	- Starts every watcher and reports when none survives
 	- Releases folded activity often, delivers it on a slower cadence
+	- Shows every recorded event in the panel as it happens
 	- Releases everything held when Studio unloads the plugin
 
 	Note: a logger nobody knows has stopped is the same as no logger, so every
@@ -53,13 +54,13 @@ local deliveryHeld = false
 ]]
 local function configurationFault(): string?
 	if Config.COLLECTOR_URL == "" or Config.COLLECTOR_URL:find("PASTE_") then
-		return "Plugin belum dikonfigurasi. COLLECTOR_URL masih placeholder, tidak ada aktivitas yang terekam."
+		return "The collector URL is still a placeholder, so nothing is being recorded. Run the installer."
 	end
 	if Config.SHARED_TOKEN == "" or Config.SHARED_TOKEN:find("PASTE_") then
-		return "Plugin belum dikonfigurasi. SHARED_TOKEN masih placeholder, collector akan menolak semua kiriman."
+		return "The shared token is still a placeholder, so the collector will refuse everything. Run the installer."
 	end
 	if not Config.COLLECTOR_URL:match("^https://") then
-		return "COLLECTOR_URL harus memakai https. Pengiriman dibatalkan."
+		return "The collector URL must use https. Nothing will be sent."
 	end
 	return nil
 end
@@ -100,6 +101,7 @@ local function runMaintenanceLoop()
 
 		Watchers.Tick()
 		followSupervisor()
+		StatusUi.Tick()
 
 		if os.clock() - lastFlushClock >= Config.FLUSH_INTERVAL_SECONDS then
 			lastFlushClock = os.clock()
@@ -128,12 +130,13 @@ end
 
 Transport.Start(plugin)
 Transport.OnHealthChanged(StatusUi.Render)
+EventLog.OnWritten(StatusUi.Record)
 
 EventLog.Write("sessionStart", Config.VERSION, SESSION_DETAIL)
 
 local watcherCount = Watchers.Start()
 if watcherCount == 0 then
-	StatusUi.ShowFatal("Tidak ada watcher yang berhasil dijalankan. Aktivitas tidak terekam sama sekali.")
+	StatusUi.ShowFatal("No watcher could start, so no activity is being recorded.")
 	warn(string.format("%s: no watcher started", Config.DISPLAY_NAME))
 	return
 end
@@ -148,6 +151,7 @@ plugin.Unloading:Connect(function()
 	running = false
 	EventLog.Write("sessionEnd", Config.VERSION, SESSION_DETAIL)
 	Watchers.Stop()
+	StatusUi.Stop()
 	Transport.Persist(plugin, true)
 	Transport.Flush(true)
 	Transport.Stop(plugin)

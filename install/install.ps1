@@ -80,12 +80,22 @@ RejectUnsafe $sharedToken 'Shared token'
 # rather than a machine that silently never reports.
 Write-Host ''
 Step 'Memeriksa collector...'
-try {
-    $check = Invoke-RestMethod -Method Get -TimeoutSec 30 -Uri (
-        '{0}?token={1}' -f $collectorUrl, [uri]::EscapeDataString($sharedToken)
-    )
-} catch {
-    Fail "Collector tidak bisa dihubungi. $($_.Exception.Message)"
+# Apps Script turns away good requests for minutes at a time, so a failed
+# check is tried again before it is believed.
+$check = $null
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+        $check = Invoke-RestMethod -Method Get -TimeoutSec 30 -Uri (
+            '{0}?token={1}' -f $collectorUrl, [uri]::EscapeDataString($sharedToken)
+        )
+        break
+    } catch {
+        if ($attempt -eq 3) {
+            Fail "Collector tidak bisa dihubungi setelah 3 percobaan. $($_.Exception.Message)"
+        }
+        Step "Collector belum menjawab ($($_.Exception.Message)). Mencoba lagi dalam 10 detik..."
+        Start-Sleep -Seconds 10
+    }
 }
 if (-not $check.ok) {
     Fail "Collector menolak: $($check.error). Periksa token, atau minta URL terbaru ke PM."
