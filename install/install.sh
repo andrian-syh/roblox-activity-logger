@@ -4,7 +4,8 @@
 #
 # Asks for the collector address, proves it works before touching anything on
 # disk, then writes the plugin where Studio loads it from. Run it again at any
-# time to update: the address already in use is offered back as the default.
+# time to update. The address is always typed in full: a wrong one carried over
+# from a previous install is the hardest kind of fault to notice.
 #
 # Run it with the command substitution form, never by piping into bash. Piping
 # leaves stdin attached to the pipe, and the prompts below cannot be answered:
@@ -56,47 +57,19 @@ fi
 
 TARGET="$PLUGINS_DIR/$PLUGIN_FILE"
 
-# Whatever is already installed supplies the defaults, so updating never means
-# hunting for the token again. The values sit inside XML, so they come back
-# escaped.
-read_installed() {
-	[ -f "$TARGET" ] || return 0
-	perl -0777 -ne "
-		if (/Config\\.$1 = \"([^\"]*)\"/) {
-			\$v = \$1;
-			\$v =~ s/&lt;/</g; \$v =~ s/&gt;/>/g; \$v =~ s/&quot;/\"/g;
-			\$v =~ s/&apos;/'/g; \$v =~ s/&amp;/&/g;
-			print \$v unless \$v =~ /^PASTE_/;
-		}
-	" "$TARGET"
-}
-
-EXISTING_URL="$(read_installed COLLECTOR_URL)"
-EXISTING_TOKEN="$(read_installed SHARED_TOKEN)"
-
-if [ -n "$EXISTING_URL" ]; then
-	printf 'URL collector [%s]: ' "$EXISTING_URL"
-else
-	printf 'URL collector (diakhiri /exec): '
-fi
+printf 'URL collector (diakhiri /exec): '
 read -r COLLECTOR_URL
-COLLECTOR_URL="${COLLECTOR_URL:-$EXISTING_URL}"
 [ -n "$COLLECTOR_URL" ] || fail 'URL collector wajib diisi.'
-case "$COLLECTOR_URL" in
-	https://*) ;;
-	*) fail 'URL collector harus memakai https.' ;;
-esac
+if ! printf '%s' "$COLLECTOR_URL" | grep -Eq '^https://[^[:space:]/]+\.[^[:space:]/]+/.+'; then
+	fail 'URL collector tidak berbentuk alamat https yang utuh. Salin apa adanya dari PM.'
+fi
 reject_unsafe "$COLLECTOR_URL" 'URL collector'
 
-if [ -n "$EXISTING_TOKEN" ]; then
-	printf 'Shared token (Enter untuk memakai yang lama): '
-else
-	printf 'Shared token: '
-fi
+printf 'Shared token: '
 read -rs SHARED_TOKEN
 printf '\n'
-SHARED_TOKEN="${SHARED_TOKEN:-$EXISTING_TOKEN}"
 [ -n "$SHARED_TOKEN" ] || fail 'Shared token wajib diisi.'
+[ "${#SHARED_TOKEN}" -ge 8 ] || fail 'Shared token terlalu pendek untuk benar. Salin apa adanya dari PM.'
 reject_unsafe "$SHARED_TOKEN" 'Shared token'
 
 ENCODED_TOKEN="$(printf '%s' "$SHARED_TOKEN" | perl -MURI::Escape -ne 'print uri_escape($_)' 2>/dev/null || printf '%s' "$SHARED_TOKEN")"

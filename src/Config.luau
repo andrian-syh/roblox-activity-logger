@@ -64,7 +64,7 @@ Config.SHARED_TOKEN = "PASTE_SHARED_TOKEN_HERE"
 	How often the settings the supervisor controls are read again, and how
 	often a machine whose delivery is held still reports that it is alive.
 ]]
-Config.BOOTSTRAP_INTERVAL_SECONDS = 300
+Config.BOOTSTRAP_INTERVAL_SECONDS = 120
 Config.PAUSED_HEARTBEAT_SECONDS = 300
 
 -- | Delivery | --

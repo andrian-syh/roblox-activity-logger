@@ -65,21 +65,23 @@ local function configurationFault(): string?
 end
 
 --[[
-	Follows whatever the supervisor has set since the last reading, and records
-	the moment delivery is held or released so the gap in the sheet has both
-	ends marked.
+	Follows whatever the supervisor has set since the last reading. A hold and
+	its release are both recorded, so the gap in the sheet has two ends, and the
+	panel is repainted whenever what it shows has moved.
 ]]
 local function followSupervisor()
-	Deployment.Refresh()
+	local changed = Deployment.Refresh()
 
 	local held = Deployment.IsPaused()
-	if held == deliveryHeld then
-		return
+	if held ~= deliveryHeld then
+		deliveryHeld = held
+		EventLog.Write(if held then "loggingPaused" else "loggingResumed", Config.VERSION, SESSION_DETAIL)
+		Transport.SetPaused(held)
 	end
 
-	deliveryHeld = held
-	EventLog.Write(if held then "loggingPaused" else "loggingResumed", Config.VERSION, SESSION_DETAIL)
-	Transport.SetPaused(held)
+	if changed then
+		StatusUi.Render(Transport.GetHealth())
+	end
 end
 
 --[[

@@ -6,7 +6,7 @@
 
 	- Settles the address from what was installed and what was entered here
 	- Records an address entered by hand, remembering what it was replacing
-	- Reads the supervisor's settings again on a slow cadence
+	- Reads the supervisor's settings again, saying whether any of them moved
 	- Reports whether delivery is being held
 	- Reports the line the supervisor wants shown, and whether this build is too old
 	- Names which of the two addresses is in force
@@ -136,12 +136,14 @@ end
 
 --[[
 	Reads the supervisor's settings again, no more often than the cadence
-	allows. A collector that cannot be reached leaves the last answer standing,
-	so a network fault never holds delivery on its own.
+	allows, and reports whether any of them moved. A collector that cannot be
+	reached leaves the last answer standing.
+
+	@return boolean -- whether anything the reader can see has changed
 ]]
-function Deployment.Refresh()
+function Deployment.Refresh(): boolean
 	if os.clock() - lastRefreshClock < Config.BOOTSTRAP_INTERVAL_SECONDS then
-		return
+		return false
 	end
 	lastRefreshClock = os.clock()
 
@@ -155,19 +157,23 @@ function Deployment.Refresh()
 		return HttpService:RequestAsync({ Url = url, Method = "GET" })
 	end)
 	if typeof(response) ~= "table" or not response.Success then
-		return
+		return false
 	end
 
 	local answer = Safe.Value(function()
 		return HttpService:JSONDecode(response.Body)
 	end)
 	if typeof(answer) ~= "table" or answer.ok == false then
-		return
+		return false
 	end
+
+	local wasPaused, wasAnnouncement, wasMinVersion = paused, announcement, minVersion
 
 	paused = answer.enabled == false
 	announcement = if typeof(answer.announcement) == "string" then answer.announcement else ""
 	minVersion = if typeof(answer.minVersion) == "string" then answer.minVersion else ""
+
+	return paused ~= wasPaused or announcement ~= wasAnnouncement or minVersion ~= wasMinVersion
 end
 
 --[[

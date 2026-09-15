@@ -62,19 +62,14 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/andrian-syh/roblox-activ
 
 Do not pipe the macOS script into `bash`. Piping takes over the input, and the prompts cannot be answered.
 
-The installer asks for the collector URL and the shared token, both from your PM. It checks them against the collector before writing anything, so a typo fails immediately instead of producing a machine that never reports. Then open Studio and confirm the panel at the bottom is **green**.
+The installer asks for the collector URL and the shared token, both from your PM. Both are typed in full every time, including when updating: an address silently carried over from an earlier install is the hardest kind of fault to notice. The installer checks them against the collector before writing anything, so a typo fails immediately instead of producing a machine that never reports. Then open Studio and confirm the panel at the bottom is **green**.
 
-Run the same command again to update. The address already installed is offered back as the default, so only Enter is needed.
+Run the same command again to update.
 
 | Panel | Meaning | Action |
 |---|---|---|
 | Green | Recording and delivering | None |
 | Red | The panel states the reason. A wrong address can be corrected in the panel itself | See [Troubleshooting](#troubleshooting). Contact your PM if it stays red |
-
-| Panel | Meaning | Action |
-|---|---|---|
-| Green | Recording and delivering | None |
-| Red | Nothing is recorded or delivered. The panel states the reason | See [Troubleshooting](#troubleshooting). Contact your PM if it stays red |
 
 The panel opens itself when it turns red. Do not disable or remove the plugin: a silent machine is reported to the supervisor.
 
@@ -247,7 +242,7 @@ A plugin from 1.2.0 onwards confirms each delivery by asking the collector wheth
 |---|---|
 | `COMPANY_TAG` | Company tag shown in brackets. Empty string hides it |
 | `COLLECTOR_URL`, `SHARED_TOKEN` | Leave as placeholders. The installer fills them in per machine |
-| `BOOTSTRAP_INTERVAL_SECONDS` | How often the `Config` tab is read again |
+| `BOOTSTRAP_INTERVAL_SECONDS` | How often the `Config` tab is read again. It bounds how long a change there takes to reach a machine |
 | `PAUSED_HEARTBEAT_SECONDS` | How often a machine whose delivery is held reports that it is alive |
 | `VERSION` | Raise on every release. Sent with every batch |
 | `WATCHED_SERVICES` | Services whose contents are recorded |

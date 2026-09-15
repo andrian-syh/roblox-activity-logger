@@ -3,7 +3,8 @@
 
     Asks for the collector address, proves it works before touching anything on
     disk, then writes the plugin where Studio loads it from. Run it again at any
-    time to update: the address already in use is offered back as the default.
+    time to update. The address is always typed in full: a wrong one carried
+    over from a previous install is the hardest kind of fault to notice.
 
     irm https://raw.githubusercontent.com/andrian-syh/roblox-activity-logger/main/install/install.ps1 | iex
 #>
@@ -26,12 +27,6 @@ function Fail($message) {
 
 function Step($message) {
     Write-Host "  $message" -ForegroundColor DarkGray
-}
-
-# The installed file holds XML, so the values read back out of it arrive
-# escaped.
-function Unescape($text) {
-    return $text.Replace('&lt;', '<').Replace('&gt;', '>').Replace('&amp;', '&')
 }
 
 # Only the three characters the builder escapes. Escaping quotes here would put
@@ -66,36 +61,19 @@ if (-not (Test-Path $pluginsDir)) {
 
 $target = Join-Path $pluginsDir $PluginFile
 
-# Whatever is already installed supplies the defaults, so updating never means
-# hunting for the token again.
-$existingUrl = ''
-$existingToken = ''
-if (Test-Path $target) {
-    $installed = Get-Content -Path $target -Raw -Encoding UTF8
-    if ($installed -match 'Config\.COLLECTOR_URL = "([^"]*)"') {
-        $existingUrl = Unescape $Matches[1]
-    }
-    if ($installed -match 'Config\.SHARED_TOKEN = "([^"]*)"') {
-        $existingToken = Unescape $Matches[1]
-    }
-    if ($existingUrl -like 'PASTE_*') { $existingUrl = '' }
-    if ($existingToken -like 'PASTE_*') { $existingToken = '' }
-}
-
-$urlPrompt = if ($existingUrl) { "URL collector [$existingUrl]" } else { 'URL collector (diakhiri /exec)' }
-$collectorUrl = (Read-Host $urlPrompt).Trim()
-if (-not $collectorUrl) { $collectorUrl = $existingUrl }
+$collectorUrl = (Read-Host 'URL collector (diakhiri /exec)').Trim()
 if (-not $collectorUrl) { Fail 'URL collector wajib diisi.' }
-if ($collectorUrl -notmatch '^https://') { Fail 'URL collector harus memakai https.' }
+if ($collectorUrl -notmatch '^https://[^\s/]+\.[^\s/]+/.+') {
+    Fail 'URL collector tidak berbentuk alamat https yang utuh. Salin apa adanya dari PM.'
+}
 RejectUnsafe $collectorUrl 'URL collector'
 
-$tokenPrompt = if ($existingToken) { 'Shared token (Enter untuk memakai yang lama)' } else { 'Shared token' }
-$tokenSecure = Read-Host $tokenPrompt -AsSecureString
+$tokenSecure = Read-Host 'Shared token' -AsSecureString
 $sharedToken = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($tokenSecure)
 ).Trim()
-if (-not $sharedToken) { $sharedToken = $existingToken }
 if (-not $sharedToken) { Fail 'Shared token wajib diisi.' }
+if ($sharedToken.Length -lt 8) { Fail 'Shared token terlalu pendek untuk benar. Salin apa adanya dari PM.' }
 RejectUnsafe $sharedToken 'Shared token'
 
 # Proving the address before writing anything turns a typo into a message here

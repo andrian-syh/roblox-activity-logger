@@ -30,6 +30,8 @@ as a new version before the plugin is distributed.
 - Any failed status from a spreadsheet collector now leads to that question being asked, rather than one particular status. The refusal code is not the same on every deployment, and the wrong guess turned a stored batch into an endless retry.
 - Values that read as dates, such as a version, are neutralised before they reach a cell. `1.3.0` was stored as 1 March 2000.
 - The installers detect Studio under the name it actually runs as, so the check is no longer skipped on a running Studio.
+- The panel repaints when the supervisor's settings change. An announcement only appeared after Studio was restarted, because the panel was painted from delivery health alone and nothing else asked it to.
+- The installers no longer offer the installed address back as a default. Both the URL and the token are typed in full every time, and both are checked for shape before anything is written.
 - Instances the session owns rather than the user, currently `Camera` and `Terrain`, are no longer reported as created and deleted.
 - `Rotation` is treated as derived. Dragging a part reported it alongside `Orientation`, which is the same change said twice.
 
