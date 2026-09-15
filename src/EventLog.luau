@@ -45,8 +45,6 @@ local recordingLabel = ""
 -- // FUNCTIONS // --
 --[[
 	Reports whether the session is being edited or played.
-
-	@return string -- the current session mode
 ]]
 local function currentMode(): string
 	return RunService:IsEdit() and "edit" or "run"
@@ -75,7 +73,6 @@ end
 	Stamps the transaction, verdict and origin for a change happening now onto
 	an entry that will be written later.
 
-	@param entry {[string]: any} -- the entry to stamp
 	@return {[string]: any} -- the same entry
 ]]
 function EventLog.Stamp(entry: { [string]: any }): { [string]: any }

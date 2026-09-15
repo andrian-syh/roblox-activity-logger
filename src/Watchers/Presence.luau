@@ -41,7 +41,6 @@ local collaboratorCount = 0
 --[[
 	Records one collaborator arriving.
 
-	@param player Player -- the collaborator who joined
 	@param operation string -- how the arrival was noticed
 ]]
 local function arrive(player: Player, operation: string)
@@ -65,8 +64,6 @@ end
 
 --[[
 	Records one collaborator leaving.
-
-	@param player Player -- the collaborator who left
 ]]
 local function depart(player: Player)
 	local userId = player.UserId

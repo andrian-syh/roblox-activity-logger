@@ -42,8 +42,6 @@ local lastTypedClock = setmetatable({}, { __mode = "k" })
 -- // FUNCTIONS // --
 --[[
 	Releases one folded run of typing in a single script.
-
-	@param entry {[string]: any} -- the folded run
 ]]
 local function release(entry: { [string]: any })
 	EventLog.WriteFolded("scriptEdit", entry.path, entry, {
@@ -59,7 +57,6 @@ end
 --[[
 	Folds one reported edit into the run in progress for its script.
 
-	@param container LuaSourceContainer -- the script being typed into
 	@param changes any -- the edit ranges the editor reported
 ]]
 local function note(container: LuaSourceContainer, changes: any)
@@ -107,8 +104,6 @@ end
 
 --[[
 	Releases the run in progress for one script immediately.
-
-	@param container LuaSourceContainer -- the script to release
 ]]
 local function flushScript(container: LuaSourceContainer)
 	edits:Release(Naming.PathOf(container))
@@ -118,7 +113,6 @@ end
 	Finds the script behind an open editor document, remembering it so the
 	document can still be named once it has closed.
 
-	@param document ScriptDocument -- an open document
 	@return LuaSourceContainer? -- the script, or nil for the command bar
 ]]
 local function scriptOf(document: ScriptDocument): LuaSourceContainer?
@@ -136,9 +130,6 @@ end
 
 --[[
 	Reports whether a script is open and being typed into right now.
-
-	@param container LuaSourceContainer -- the script to test
-	@return boolean -- whether a person is typing into it
 ]]
 function Editor.IsBeingTyped(container: LuaSourceContainer): boolean
 	if not openScripts[container] then

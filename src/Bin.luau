@@ -1,7 +1,7 @@
 --[[
 	Bin - Connection ownership
 
-	Holds a group of connections so a watcher can release all of them at once.
+	Holds a group of connections so their owner can release all of them at once.
 
 	- Takes ownership of a connection and returns it for chaining
 	- Reports how many connections are held
@@ -24,8 +24,6 @@ Bin.__index = Bin
 -- // FUNCTIONS // --
 --[[
 	Creates an empty bin.
-
-	@return Bin -- a bin holding nothing
 ]]
 function Bin.new(): Bin
 	return setmetatable({ _connections = {} }, Bin) :: any
@@ -34,8 +32,7 @@ end
 --[[
 	Takes ownership of a connection.
 
-	@param connection RBXScriptConnection -- the connection to own
-	@return RBXScriptConnection -- the same connection, for chaining
+	@return RBXScriptConnection -- the same connection, so the call can be chained
 ]]
 function Bin:Add(connection: RBXScriptConnection): RBXScriptConnection
 	table.insert(self._connections, connection)
@@ -44,8 +41,6 @@ end
 
 --[[
 	Reports how many connections the bin holds.
-
-	@return number -- the number of owned connections
 ]]
 function Bin:Count(): number
 	return #self._connections

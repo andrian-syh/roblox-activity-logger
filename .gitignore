@@ -1,0 +1,5 @@
+# Build output. Released as GitHub release assets, never committed.
+dist/
+*.rbxmx
+*.rbxm
+*.sha256

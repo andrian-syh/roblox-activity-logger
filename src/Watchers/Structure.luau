@@ -5,6 +5,7 @@
 	content.
 
 	- Reports an instance appearing, with its path and class
+	- Ignores the classes Studio maintains for itself
 	- Reports an instance leaving, named as it was before detaching
 	- Folds a subtree arriving or leaving at once into one row for its root
 	- Reports an instance leaving one place and arriving in another as a move
@@ -68,8 +69,6 @@ local closeScheduled = false
 -- // FUNCTIONS // --
 --[[
 	Announces a new instance to anything that wants to watch it.
-
-	@param instance Instance -- the instance that appeared
 ]]
 local function announce(instance: Instance)
 	for _, listener in listeners do
@@ -81,7 +80,6 @@ end
 	Describes a subtree by its shape, so a pasted copy can be recognised as the
 	content that was cut.
 
-	@param instance Instance -- the subtree root
 	@param nested number -- how many instances the subtree holds
 	@return string -- identical for identical content
 ]]
@@ -114,7 +112,6 @@ end
 	Writes a single row for a structural change.
 
 	@param kind string -- the structural change
-	@param row Row -- the subtree root being reported
 	@param detail EventLog.Detail? -- fields beyond class and size
 ]]
 local function writeRow(kind: string, row: Row, detail: EventLog.Detail?)
@@ -153,7 +150,6 @@ end
 	The same instance coming back is a restore or a move; different instances
 	with identical content are a paste of what was cut.
 
-	@param arrival Row -- the instance that arrived
 	@return boolean -- whether the arrival was reported as part of a pair
 ]]
 local function claimHeld(arrival: Row): boolean
@@ -274,7 +270,6 @@ end
 	so a subtree always lands inside one burst.
 
 	@param kind string -- the structural change being gathered
-	@return Burst -- the burst collecting that kind
 ]]
 local function burstOf(kind: string): Burst
 	local burst = bursts[kind]
@@ -305,8 +300,6 @@ end
 	A destroyed subtree keeps no ancestry, so its remembered path is checked
 	when the live parent chain is gone.
 
-	@param burst Burst -- the burst to search
-	@param instance Instance -- the instance being reported
 	@param path string -- the path the instance is reported under
 	@return Row? -- the ancestor's row, or nil when this instance is a root
 ]]
@@ -343,6 +336,10 @@ end
 	@param path string -- the path to report it under
 ]]
 local function gather(kind: string, service: Instance, instance: Instance, path: string)
+	if Config.IGNORED_CLASSES[instance.ClassName] then
+		return
+	end
+
 	local burst = burstOf(kind)
 
 	local parentRow = ancestorRow(burst, instance, path)
@@ -393,8 +390,6 @@ end
 
 --[[
 	Returns every service holding project content that this place has.
-
-	@return {Instance} -- the reachable watched services
 ]]
 function Structure.Roots(): { Instance }
 	local roots = {}

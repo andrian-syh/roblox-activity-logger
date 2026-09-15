@@ -10,6 +10,60 @@ as a new version before the plugin is distributed.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-15
+
+### Added
+
+- Installers for Windows and macOS. They ask for the collector address, prove it against the collector before touching the disk, verify the download against a published checksum, write the plugin where Studio loads it, remove older copies under other names, and register the machine in the sheet before Studio has ever been opened.
+- `installed` event, sent by the installer under a `userId` of `install:<machine name>`. The gap between the team roster and the `Heartbeat` tab is now the list of people who have not installed.
+- `Config` tab in the sheet, holding the settings a supervisor changes without anyone rebuilding or redeploying: `minVersion`, `announcement` and `enabled`. It is created with documented defaults the first time a machine asks for it.
+- Version gate. A plugin older than `minVersion` shows a red panel telling the developer to reinstall, and keeps recording.
+- Delivery hold. Setting `enabled` to `FALSE` holds delivery on every machine while recording continues; queued activity goes out when it is `TRUE` again. A held machine still reports that it is alive, so the silence alert does not fire for a pause that was asked for.
+- `loggingPaused` and `loggingResumed` events, so a hold has both ends marked in `Events`.
+- A collector address can be entered in the status panel whenever it is red. The entry survives until an installer run changes the address underneath it, so a correction sticks and a reinstall is never overruled by something typed months earlier.
+- The panel shows the installed version and the supervisor's announcement.
+- `build.py` writes a `.sha256` beside the plugin. The installers refuse a file they cannot verify.
+
+### Fixed
+
+- A batch the collector could not be asked about was treated as delivered and dropped from the queue. Only the collector saying it holds a batch counts as delivery now; anything unconfirmed stays queued and is retried under the same identity. A spreadsheet collector rejects a run of requests often enough that this quietly discarded whole sessions.
+- Any failed status from a spreadsheet collector now leads to that question being asked, rather than one particular status. The refusal code is not the same on every deployment, and the wrong guess turned a stored batch into an endless retry.
+- Values that read as dates, such as a version, are neutralised before they reach a cell. `1.3.0` was stored as 1 March 2000.
+- The installers detect Studio under the name it actually runs as, so the check is no longer skipped on a running Studio.
+- Instances the session owns rather than the user, currently `Camera` and `Terrain`, are no longer reported as created and deleted.
+- `Rotation` is treated as derived. Dragging a part reported it alongside `Orientation`, which is the same change said twice.
+
+### Changed
+
+- `COLLECTOR_URL` and `SHARED_TOKEN` stay as placeholders in the source and are written per machine by the installer, so no released file carries the token.
+- Releases are published as GitHub releases and installed from `releases/latest/download`, rather than passed around as files.
+
+## [1.2.0] - 2026-09-15
+
+### Added
+
+- `sessionStart` and `sessionEnd` events. Both carry the plugin version in `target`, so the sheet shows which build each machine ran and how long its session lasted. The collector already described them; nothing produced them.
+- The collector answers `GET` with a batch id, reporting whether that batch is stored. A write is answered over a redirect the plugin cannot read, so delivery is now confirmed by asking rather than assumed from the refusal.
+- A rejected `SHARED_TOKEN` reaches the plugin as a delivery failure and turns the panel red, instead of passing for success.
+- `Heartbeat` gains a `version` column and a `conflicts` column. A conflict is one person reporting from two live sessions, or one session reporting under two people; neither happens while people work normally. The supervisor is emailed at most once an hour per person.
+- `Config.TICK_INTERVAL_SECONDS` (default `1`): how often folded activity is released.
+- `Config.SNAPSHOT_PROPERTIES`: the properties read when an instance comes under watch, so the first change to one of them can report what it was before.
+
+### Changed
+
+- Folding windows are released on their own cadence instead of the delivery cadence. Every `*_COALESCE_SECONDS` setting now means what it says.
+- Cross-machine fingerprints bucket time to 30 seconds rather than 5, so two machines reporting one change still group together when their clocks disagree.
+- A plugin built before this release keeps working against a collector deployed before it: an answer the collector cannot give is taken the old way, as delivery.
+
+### Fixed
+
+- The collector marked a batch stored before writing it. A write that failed after that point left the batch remembered as stored, so the retry was dismissed as a duplicate and the batch was lost. It is marked only once the rows are in the sheet.
+- Undelivered activity is written to disk before the closing delivery is attempted, not after. A shutdown during that delivery no longer takes the queue with it.
+- The batch being delivered is kept across sessions alongside the queue. A batch that reached the collector and lost its reply is retried under the identity it already had, instead of being stored a second time under a new one.
+- Events discarded from a full queue no longer leave the batch identity pointing at a set of events that no longer exists, which had the collector dismiss the replacement batch unread.
+- The first change to a watched property reports the value it had before, for the properties people edit. It reported `<unknown>` for every property's first change.
+- Activity that cannot be kept for the next session is reported instead of being dropped in silence.
+
 ## [1.1.0] - 2026-09-15
 
 ### Added
@@ -68,6 +122,8 @@ as a new version before the plugin is distributed.
 - Google Sheet collector with `Events` and `Heartbeat` tabs, readable summaries, cross-machine fingerprints, formula injection protection, and an hourly silent-machine email alert.
 - `build.py` to build the plugin without a Roblox toolchain.
 
-[Unreleased]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/andrian-syh/roblox-activity-logger/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/andrian-syh/roblox-activity-logger/releases/tag/v1.0.0

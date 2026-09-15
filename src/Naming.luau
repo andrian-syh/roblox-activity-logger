@@ -28,7 +28,6 @@ local pathCache = setmetatable({}, { __mode = "k" })
 --[[
 	Names an instance that is still in the tree, and remembers the name.
 
-	@param instance Instance -- the instance to name
 	@return string -- the full path, or the last one seen for a detached instance
 ]]
 function Naming.PathOf(instance: Instance): string
@@ -47,7 +46,6 @@ end
 --[[
 	Names an instance that has already left the tree.
 
-	@param instance Instance -- the instance being removed
 	@return string -- the last path seen while the instance was attached
 ]]
 function Naming.RemovedPathOf(instance: Instance): string
@@ -64,8 +62,6 @@ end
 
 --[[
 	Forgets an instance, so a reused reference cannot inherit a stale name.
-
-	@param instance Instance -- the instance to forget
 ]]
 function Naming.Forget(instance: Instance)
 	pathCache[instance] = nil
@@ -73,9 +69,6 @@ end
 
 --[[
 	Renders a value for the log, trimmed to a length a reader can scan.
-
-	@param value any -- the value to render
-	@return string -- a printable form of the value
 ]]
 function Naming.Describe(value: any): string
 	local ok, text = pcall(tostring, value)
@@ -91,8 +84,6 @@ end
 --[[
 	Renders one property of an instance for the log.
 
-	@param instance Instance -- the instance to read
-	@param property string -- the property to read
 	@return string -- the rendered value, or a placeholder when unreadable
 ]]
 function Naming.DescribeProperty(instance: Instance, property: string): string
@@ -105,9 +96,6 @@ end
 
 --[[
 	Flattens text to a single line and trims it to a preview.
-
-	@param text string -- the text to shorten
-	@return string -- a single-line preview
 ]]
 function Naming.Preview(text: string): string
 	local flattened = text:gsub("%s+", " ")

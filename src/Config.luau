@@ -7,9 +7,12 @@
 	- Names the company and the plugin as they appear in Studio
 	- Lists the change recordings that identify an assistant or a tool
 	- Names the collector and the token sent with each batch
+	- Sets how often the supervisor's settings are read again
 	- Sets delivery cadence, batch size and retry behaviour
 	- Sets how long each kind of burst is folded before release
 	- Caps what is watched and how much of a value is logged
+	- Lists the properties read ahead of time, so a change knows its old value
+	- Lists the classes the engine maintains rather than the user
 	- Lists the services holding project content
 	- Lists the properties the engine recomputes on its own
 
@@ -25,7 +28,7 @@ local Config = {}
 	Stamped on every batch so the collector can tell which build a machine is
 	running. Raise it whenever the event shape changes.
 ]]
-Config.VERSION = "1.1.0"
+Config.VERSION = "1.3.0"
 
 -- | Branding | --
 --[[
@@ -57,7 +60,15 @@ Config.COLLECTOR_URL = "PASTE_COLLECTOR_URL_HERE"
 ]]
 Config.SHARED_TOKEN = "PASTE_SHARED_TOKEN_HERE"
 
+--[[
+	How often the settings the supervisor controls are read again, and how
+	often a machine whose delivery is held still reports that it is alive.
+]]
+Config.BOOTSTRAP_INTERVAL_SECONDS = 300
+Config.PAUSED_HEARTBEAT_SECONDS = 300
+
 -- | Delivery | --
+Config.TICK_INTERVAL_SECONDS = 1
 Config.FLUSH_INTERVAL_SECONDS = 15
 Config.QUEUE_CAPACITY = 2000
 Config.BATCH_LIMIT = 200
@@ -88,6 +99,8 @@ Config.BULK_SCRIPT_THRESHOLD = 5
 
 -- | Storage | --
 Config.SETTING_KEY_QUEUE = "StudioActivityLogger_PendingQueue"
+Config.SETTING_KEY_BATCH = "StudioActivityLogger_PendingBatchId"
+Config.SETTING_KEY_OVERRIDE = "StudioActivityLogger_Override"
 Config.WIDGET_ID = "StudioActivityLogger_Status"
 
 --[[
@@ -110,6 +123,38 @@ Config.WATCHED_SERVICES = {
 }
 
 --[[
+	The properties read when an instance comes under watch, so the first change
+	to one of them can report what it was before. The order is also the order of
+	interest: when several change at once, the earliest one here is reported.
+]]
+Config.SNAPSHOT_PROPERTIES = {
+	"Name",
+	"Size",
+	"Position",
+	"Orientation",
+	"CFrame",
+	"Anchored",
+	"CanCollide",
+	"Color",
+	"Material",
+	"Transparency",
+	"Enabled",
+	"Visible",
+	"Text",
+	"Value",
+}
+
+--[[
+	Classes Studio maintains for itself. They come and go with the session
+	rather than with anyone's work, so their arrival and departure says nothing
+	about who changed what.
+]]
+Config.IGNORED_CLASSES = {
+	Camera = true,
+	Terrain = true,
+}
+
+--[[
 	Properties the engine recomputes rather than the user setting them.
 	Reporting these would bury every real edit.
 ]]
@@ -120,6 +165,7 @@ Config.DERIVED_PROPERTIES = {
 	AssemblyMass = true,
 	AssemblyRootPart = true,
 	CenterOfMass = true,
+	CFrame = true,
 	ExtentsCFrame = true,
 	ExtentsSize = true,
 	Mass = true,
@@ -127,6 +173,7 @@ Config.DERIVED_PROPERTIES = {
 	ModelMeshSize = true,
 	ReceiveAge = true,
 	ResizeableFaces = true,
+	Rotation = true,
 	WorldCFrame = true,
 	WorldPivot = true,
 	WorldPosition = true,

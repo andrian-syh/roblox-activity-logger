@@ -1,15 +1,15 @@
-"""Builds the plugin into a single .rbxmx, with no Roblox toolchain installed.
+"""Builds the plugin into a single model file, with no Roblox toolchain installed.
 
-Mirrors the Rojo source layout: `init.server.luau` becomes the root Script, a
-directory holding `init.luau` becomes a ModuleScript with its siblings as
-children, and every other `.luau` file becomes a plain ModuleScript.
+The source tree is read the way a sync tool reads it: the entry point becomes
+the root script, a directory becomes a module with its siblings as children,
+and every other source file becomes a module of its own.
 
-Run `python build.py` to write the file into the local Studio plugins folder,
-or pass a path to write it elsewhere. Rojo remains the better choice once the
-project needs a real toolchain; this exists so a teammate can produce the same
-file without installing anything.
+Run it with no argument to write into the local Studio plugins folder, or pass
+a path to write elsewhere. A real toolchain is the better answer once the
+project needs one; this exists so a teammate can build without installing any.
 """
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -33,6 +33,7 @@ class Referent:
 
 
 def default_output() -> Path:
+    """Names the file to write when the caller names none."""
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         return Path(local_app_data) / "Roblox" / "Plugins" / f"{PLUGIN_NAME}.rbxmx"
@@ -40,6 +41,7 @@ def default_output() -> Path:
 
 
 def item(class_name: str, name: str, source: str, referent: str, children: str = "") -> str:
+    """Renders one instance, and whatever it contains, in the model format."""
     return (
         f'<Item class="{class_name}" referent="{referent}">'
         "<Properties>"
@@ -78,10 +80,12 @@ def build_directory(directory: Path, referents: Referent) -> str:
 
 
 def count_modules(directory: Path) -> int:
+    """Counts the modules written, for the line printed at the end."""
     return sum(1 for path in directory.rglob("*.luau") if path.name != ENTRY)
 
 
 def build() -> str:
+    """Renders the whole plugin as one model document."""
     entry_path = SOURCE_DIR / ENTRY
     if not entry_path.exists():
         raise SystemExit(f"missing entry point: {entry_path}")
@@ -94,13 +98,24 @@ def build() -> str:
 
 
 def main() -> None:
+    """Writes the plugin where the caller asked for it, and says where that was.
+
+    A checksum is written beside it, because the installer refuses to install a
+    file it cannot verify.
+    """
     output = Path(sys.argv[1]) if len(sys.argv) > 1 else default_output()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(build(), encoding="utf-8")
+
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    checksum = output.with_name(output.name + ".sha256")
+    checksum.write_text(digest + "  " + output.name + "\n", encoding="utf-8")
+
     print(
         f"wrote {output} ({output.stat().st_size} bytes, "
         f"1 script + {count_modules(SOURCE_DIR)} modules)"
     )
+    print(f"wrote {checksum}")
 
 
 if __name__ == "__main__":

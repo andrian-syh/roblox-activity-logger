@@ -7,8 +7,11 @@
 	- Stamps each event with the place, session and user it happened in
 	- Queues events and discards the oldest only when full
 	- Delivers in batches, retrying with a widening back-off
+	- Holds delivery on request, while still reporting the machine as alive
 	- Keeps one batch identity across retries so nothing is stored twice
-	- Keeps undelivered work across sessions and unclean shutdowns
+	- Asks the collector whether a batch landed when the reply cannot say
+	- Treats anything it cannot confirm as undelivered, and keeps it queued
+	- Keeps undelivered work, and the batch it was sending, across sessions
 	- Publishes delivery health to whatever displays it
 	- Resolves the published name of the place being edited
 
@@ -36,7 +39,6 @@ export type Health = {
 
 -- | Constants | --
 local APPS_SCRIPT_PATTERN = "script%.google%.com/macros/"
-local REDIRECTED_TO_READ_ONLY = 405
 
 -- | State Management | --
 local Transport = {}
@@ -50,6 +52,8 @@ local nextAttemptClock = 0
 local lastPersistClock = 0
 local sending = false
 local persistedAnything = false
+local paused = false
+local lastHeartbeatClock = -math.huge
 
 local sessionId = HttpService:GenerateGUID(false)
 local pendingBatchId = ""
@@ -118,8 +122,6 @@ end
 
 --[[
 	Reclaims activity left behind by a previous session.
-
-	@param plugin Plugin -- the running plugin
 ]]
 local function restoreQueue(plugin: Plugin)
 	local stored = Safe.Value(function()
@@ -136,8 +138,16 @@ local function restoreQueue(plugin: Plugin)
 		queue = restored
 	end
 
+	local storedBatchId = Safe.Value(function()
+		return plugin:GetSetting(Config.SETTING_KEY_BATCH)
+	end)
+	if typeof(storedBatchId) == "string" then
+		pendingBatchId = storedBatchId
+	end
+
 	Safe.Call(function()
 		plugin:SetSetting(Config.SETTING_KEY_QUEUE, nil)
+		plugin:SetSetting(Config.SETTING_KEY_BATCH, nil)
 	end)
 end
 
@@ -162,12 +172,65 @@ local function resolvePlaceName()
 end
 
 --[[
-	Sends one batch and reports whether the collector stored it.
+	Reads the collector's answer, when the reply carries one.
 
-	A spreadsheet-backed collector refuses the request after storing it, so
-	that one refusal counts as delivery. Others are judged on status alone.
+	@return {[string]: any}? -- the answer, or nil when there is none to read
+]]
+local function decodedAnswer(body: string?): { [string]: any }?
+	if typeof(body) ~= "string" or body == "" then
+		return nil
+	end
+	local answer = Safe.Value(function()
+		return HttpService:JSONDecode(body)
+	end)
+	return if typeof(answer) == "table" then answer else nil
+end
 
-	@param batch {any} -- the events to deliver
+--[[
+	Asks the collector whether it holds a batch whose reply could not be read.
+	Only the collector saying so counts as delivery, and an unanswered question
+	leaves the batch queued for a retry it recognises rather than stores twice.
+
+	@param status number -- the status the write itself came back with
+	@return boolean -- whether the collector holds the batch
+	@return string -- the failure reason, empty on success
+]]
+local function confirmStored(batchId: string, status: number): (boolean, string)
+	local url = string.format(
+		"%s?token=%s&batchId=%s",
+		Config.COLLECTOR_URL,
+		HttpService:UrlEncode(Config.SHARED_TOKEN),
+		HttpService:UrlEncode(batchId)
+	)
+
+	local response = Safe.Value(function()
+		return HttpService:RequestAsync({ Url = url, Method = "GET" })
+	end)
+	if typeof(response) ~= "table" then
+		return false, string.format("HTTP %d, and the check could not be sent", status)
+	end
+	if not response.Success then
+		return false, string.format("HTTP %d, check HTTP %d", status, response.StatusCode)
+	end
+
+	local answer = decodedAnswer(response.Body)
+	if not answer then
+		return false, string.format("HTTP %d, and the check was unreadable", status)
+	end
+	if answer.ok == false then
+		return false, tostring(answer.error or "collector refused the batch")
+	end
+	if answer.stored ~= true then
+		return false, "collector does not hold the batch"
+	end
+	return true, ""
+end
+
+--[[
+	Sends one batch and reports whether the collector stored it. A reply the
+	collector controls is believed as written. An unreadable reply says nothing
+	about the write behind it, so that one is settled by asking.
+
 	@param batchId string -- identifies this batch across retries
 	@return boolean -- whether the collector stored the batch
 	@return string -- the failure reason, empty on success
@@ -202,24 +265,56 @@ local function deliver(batch: { any }, batchId: string): (boolean, string)
 	if typeof(response) ~= "table" then
 		return false, "request was rejected before it was sent"
 	end
+
 	if response.Success then
+		local answer = decodedAnswer(response.Body)
+		if answer and answer.ok == false then
+			return false, tostring(answer.error or "collector refused the batch")
+		end
 		return true, ""
 	end
-	-- ponytail: treat the redirect refusal as delivery for a spreadsheet
-	-- collector only; drop this once the collector answers writes directly.
-	if response.StatusCode == REDIRECTED_TO_READ_ONLY and Config.COLLECTOR_URL:find(APPS_SCRIPT_PATTERN) then
-		return true, ""
+
+	if Config.COLLECTOR_URL:find(APPS_SCRIPT_PATTERN) then
+		return confirmStored(batchId, response.StatusCode)
 	end
+
 	return false, string.format("HTTP %d %s", response.StatusCode, tostring(response.StatusMessage))
 end
 
 --[[
-	Queues one event, stamped with its own place, session and user, since the
-	queue can be delivered later from another place.
+	Reports that this machine is still here while its delivery is held, so a
+	held machine is not mistaken for a machine that stopped reporting. The
+	report carries no events, only the sender.
+]]
+local function sendHeartbeat()
+	if os.clock() - lastHeartbeatClock < Config.PAUSED_HEARTBEAT_SECONDS then
+		return
+	end
+	lastHeartbeatClock = os.clock()
 
-	At capacity the oldest events are discarded and the loss is reported.
+	sending = true
+	local success, reason = deliver({}, HttpService:GenerateGUID(false))
+	sending = false
 
-	@param event {[string]: any} -- the event to deliver
+	if success then
+		markSuccess()
+	else
+		markFailure(reason)
+	end
+end
+
+--[[
+	Holds delivery, or releases it. Recording is untouched either way: what is
+	queued while delivery is held goes out once it resumes.
+]]
+function Transport.SetPaused(value: boolean)
+	paused = value
+end
+
+--[[
+	Queues one event, stamped with the place, session and user it happened in,
+	since the queue can be delivered later from somewhere else. At capacity the
+	oldest go, and the batch identity naming them goes with them.
 ]]
 function Transport.Push(event: { [string]: any })
 	event.placeId = game.PlaceId
@@ -230,6 +325,7 @@ function Transport.Push(event: { [string]: any })
 	if #queue >= Config.QUEUE_CAPACITY then
 		table.remove(queue, 1)
 		droppedCount += 1
+		pendingBatchId = ""
 		health.Healthy = false
 		health.Reason = string.format("Queue penuh, %d event terbuang", droppedCount)
 	end
@@ -240,13 +336,20 @@ end
 --[[
 	Attempts to deliver what is queued.
 
-	Safe to call on a timer: overlapping calls and back-off windows are
-	handled here.
+	Safe to call on a timer: overlapping calls, back-off windows and a held
+	delivery are all handled here.
 
 	@param force boolean? -- attempt even inside the back-off window
 ]]
 function Transport.Flush(force: boolean?)
-	if sending or #queue == 0 then
+	if sending then
+		return
+	end
+	if paused then
+		sendHeartbeat()
+		return
+	end
+	if #queue == 0 then
 		return
 	end
 	if not force and os.clock() < nextAttemptClock then
@@ -289,8 +392,6 @@ end
 
 --[[
 	Reports the current delivery health.
-
-	@return Health -- the live health state
 ]]
 function Transport.GetHealth(): Health
 	return health
@@ -310,12 +411,10 @@ function Transport.OnHealthChanged(listener: (Health) -> ())
 end
 
 --[[
-	Keeps undelivered activity where the next session can find it.
+	Keeps undelivered activity, and the batch identity it belongs to, where the
+	next session can find both. The identity is dropped while a send is open,
+	since the snapshot then holds none of the events it names.
 
-	Studio does not always get to unload a plugin cleanly, so this runs on a
-	timer as well as at shutdown.
-
-	@param plugin Plugin -- the running plugin
 	@param force boolean? -- persist without waiting for the interval
 ]]
 function Transport.Persist(plugin: Plugin, force: boolean?)
@@ -329,6 +428,7 @@ function Transport.Persist(plugin: Plugin, force: boolean?)
 			persistedAnything = false
 			Safe.Call(function()
 				plugin:SetSetting(Config.SETTING_KEY_QUEUE, nil)
+				plugin:SetSetting(Config.SETTING_KEY_BATCH, nil)
 			end)
 		end
 		return
@@ -338,19 +438,19 @@ function Transport.Persist(plugin: Plugin, force: boolean?)
 		return HttpService:JSONEncode(queue)
 	end)
 	if typeof(encoded) ~= "string" then
+		warn(string.format("%s: %d queued events could not be kept for the next session", Config.DISPLAY_NAME, #queue))
 		return
 	end
 
 	persistedAnything = true
 	Safe.Call(function()
 		plugin:SetSetting(Config.SETTING_KEY_QUEUE, encoded)
+		plugin:SetSetting(Config.SETTING_KEY_BATCH, if sending then "" else pendingBatchId)
 	end)
 end
 
 --[[
 	Prepares delivery and reclaims anything a previous session left behind.
-
-	@param plugin Plugin -- the running plugin
 ]]
 function Transport.Start(plugin: Plugin)
 	restoreQueue(plugin)
@@ -359,8 +459,6 @@ end
 
 --[[
 	Keeps undelivered activity as the plugin unloads.
-
-	@param plugin Plugin -- the running plugin
 ]]
 function Transport.Stop(plugin: Plugin)
 	Transport.Persist(plugin, true)

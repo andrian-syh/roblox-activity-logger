@@ -143,8 +143,6 @@ end
 --[[
 	Records whether anyone else is editing the place, which decides who an
 	unexplained change is credited to.
-
-	@param isAlone boolean -- whether the local user is the only editor
 ]]
 function Authorship.SetAlone(isAlone: boolean)
 	alone = isAlone

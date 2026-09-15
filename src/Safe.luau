@@ -29,8 +29,7 @@ local reportedFailures = {}
 	Reports a failure once per distinct message, so a signal that fails on
 	every call cannot flood the output.
 
-	@param context string -- where the failure happened
-	@param message string -- what went wrong
+	@param context string -- names the failure in the report
 ]]
 local function reportOnce(context: string, message: string)
 	local key = context .. "|" .. message
@@ -44,8 +43,7 @@ end
 --[[
 	Calls a function and reports any failure instead of propagating it.
 
-	@param callback (...any) -> ...any -- the work to attempt
-	@param ... any -- arguments passed to the callback
+	@param ... any -- forwarded to the callback
 	@return boolean -- whether the call completed
 ]]
 function Safe.Call(callback: (...any) -> ...any, ...): boolean
@@ -59,8 +57,7 @@ end
 --[[
 	Calls a function and returns its result, or nothing when it fails.
 
-	@param callback (...any) -> any -- the work to attempt
-	@param ... any -- arguments passed to the callback
+	@param ... any -- forwarded to the callback
 	@return any -- the result, or nil when the call failed
 ]]
 function Safe.Value(callback: (...any) -> any, ...): any
@@ -76,7 +73,6 @@ end
 	Wraps a signal handler so a failure inside it cannot break the connection.
 
 	@param context string -- names the handler in any failure report
-	@param handler (...any) -> () -- the handler to protect
 	@return (...any) -> () -- a handler that never throws
 ]]
 function Safe.Handler(context: string, handler: (...any) -> ()): (...any) -> ()
@@ -89,10 +85,8 @@ function Safe.Handler(context: string, handler: (...any) -> ()): (...any) -> ()
 end
 
 --[[
-	Reads one property, yielding a placeholder when it cannot be read.
+	Reads one property, yielding nothing when it cannot be read.
 
-	@param instance Instance -- the instance to read
-	@param property string -- the property to read
 	@return any -- the value, or nil when it is unreadable
 ]]
 function Safe.Property(instance: Instance, property: string): any

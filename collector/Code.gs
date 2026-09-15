@@ -1,14 +1,19 @@
 /**
- * Collector for the Studio Activity Logger.
- *
- * Deploy as a Web App: Execute as "Me", access "Anyone". Bind it to a
- * spreadsheet, then set SHARED_TOKEN to the same value the plugin ships with
- * and paste the /exec URL into the plugin's Config.luau.
+ * Collector for the Studio Activity Logger. Runs as a web app bound to one
+ * spreadsheet; the deployment steps and the settings below are described in
+ * README.md.
  *
  * Two sheets are maintained:
  *   Events    - one row per reported activity, append only
  *   Heartbeat - one row per machine, overwritten, so a machine that stops
  *               reporting is visible at a glance
+ *
+ * A batch is addressable after the fact, so a sender whose reply it could not
+ * read can ask whether the batch landed and be told when it was refused.
+ *
+ * A third sheet, Config, holds the few settings a supervisor changes without
+ * anyone rebuilding or redeploying anything. Machines read it when they start
+ * and at intervals after that.
  *
  * Every column means the same thing for every event kind. The plugin sends
  * structured fields only; the readable sentence in the summary column is
@@ -21,7 +26,12 @@ var SHARED_TOKEN = 'PASTE_SHARED_TOKEN_HERE';
 var ALERT_EMAIL = 'PASTE_SUPERVISOR_EMAIL_HERE';
 var SILENT_MINUTES = 120;
 
+// Two sessions reporting for one person at once means one of them is forged,
+// since a person edits from one Studio at a time.
+var CONFLICT_MINUTES = 5;
+
 var MAX_CELL_LENGTH = 500;
+var BATCH_MEMORY_SECONDS = 21600;
 
 var EVENT_HEADERS = [
   'receivedAt', 'eventAt', 'userId', 'sessionId', 'placeId', 'placeName',
@@ -30,15 +40,23 @@ var EVENT_HEADERS = [
   'fingerprint', 'origin'
 ];
 
+var CONFIG_HEADERS = ['key', 'value', 'notes'];
+
+var CONFIG_DEFAULTS = [
+  ['minVersion', '', 'Plugins older than this show a red panel and keep recording. Blank turns the check off'],
+  ['announcement', '', 'One line shown in every plugin panel. Blank shows nothing'],
+  ['enabled', 'TRUE', 'FALSE holds delivery on every machine. Recording continues and catches up when it is TRUE again']
+];
+
 var HEARTBEAT_HEADERS = [
-  'userId', 'sessionId', 'placeId', 'placeName', 'lastSeen', 'eventsReceived'
+  'userId', 'sessionId', 'placeId', 'placeName', 'lastSeen', 'eventsReceived',
+  'version', 'conflicts'
 ];
 
 /**
- * Makes one value safe to write into a cell. Control characters and line
- * breaks would split a row visually, an over-long value would swamp it, and a
- * leading formula character would make Sheets evaluate logged text as a
- * formula.
+ * Makes one value safe to write into a cell. Untrimmed text disfigures a row,
+ * a name that opens like a formula is evaluated as one, and a version reads as
+ * a date, unless each is neutralised here.
  */
 function cell(value) {
   if (value === null || value === undefined || value === '') {
@@ -51,7 +69,7 @@ function cell(value) {
   if (text.length > MAX_CELL_LENGTH) {
     text = text.substring(0, MAX_CELL_LENGTH) + '...';
   }
-  if (/^[=+\-@]/.test(text)) {
+  if (/^[=+\-@]/.test(text) || /^[0-9]+([.\-\/][0-9]+)+$/.test(text)) {
     text = "'" + text;
   }
   return text;
@@ -79,6 +97,12 @@ function summaryFor(event) {
   var amount = Number(event.amount || 0);
 
   switch (event.kind) {
+    case 'installed':
+      return 'Installed the plugin on this machine (version ' + (event.target || 'unknown') + ')';
+    case 'loggingPaused':
+      return 'Delivery held by the supervisor. Recording continues';
+    case 'loggingResumed':
+      return 'Delivery released by the supervisor';
     case 'sessionStart':
       return 'Opened the place in Studio';
     case 'sessionEnd':
@@ -105,8 +129,11 @@ function summaryFor(event) {
       }
       return amount === 1 ? 'Selected "' + leaf + '"' : 'Selected ' + amount + ' instances';
     case 'property':
-      return 'Set ' + event.property + ' on "' + leaf + '" from ' +
-        (event.oldValue || 'unknown') + ' to ' + (event.newValue || 'unknown');
+      var changed = String(event.property || '').split(', ');
+      var leading = changed.shift();
+      return 'Set ' + leading + ' on "' + leaf + '" from ' +
+        (event.oldValue || 'unknown') + ' to ' + (event.newValue || 'unknown') +
+        (changed.length > 0 ? ', and ' + changed.join(', ') : '');
     case 'attribute':
       return 'Set attribute ' + event.property + ' on "' + leaf + '" to ' + (event.newValue || '');
     case 'scriptEdit':
@@ -140,11 +167,11 @@ function summaryFor(event) {
 
 /**
  * Builds a short key that is identical across machines for the same
- * underlying change, so replicated reports collapse into one group. The
- * timestamp is bucketed to absorb clock skew between laptops.
+ * underlying change, so replicated reports collapse into one group. Machines
+ * disagree about the clock, so the time is coarsened before it is hashed.
  */
 function fingerprintOf(event) {
-  var bucket = Math.floor((event.epoch || 0) / 5);
+  var bucket = Math.floor((event.epoch || 0) / 30);
   var seed = [event.kind, event.target, event.property || '', bucket].join('|');
 
   var hash = 0;
@@ -180,20 +207,89 @@ function getSheet(name, headers) {
 }
 
 /**
- * Reports whether this batch has already been stored. A delivery that fails
- * after the collector wrote it is retried by the plugin with the same batch
- * id, and without this check the retry would duplicate every row.
+ * Reports whether this batch is already in the sheet. A delivery that fails
+ * after the rows were written is retried under the same batch id, and without
+ * this check the retry would duplicate every row.
  */
 function alreadyStored(batchId) {
   if (!batchId) {
     return false;
   }
-  var cache = CacheService.getScriptCache();
-  if (cache.get('batch_' + batchId)) {
-    return true;
+  return CacheService.getScriptCache().get('batch_' + batchId) === 'stored';
+}
+
+/**
+ * Remembers that a batch reached the sheet. Called only once the rows are
+ * written: marking it beforehand would turn a failed write into a batch the
+ * plugin is told to stop retrying, losing it for good.
+ */
+function markStored(batchId) {
+  if (!batchId) {
+    return;
   }
-  cache.put('batch_' + batchId, '1', 21600);
-  return false;
+  CacheService.getScriptCache().put('batch_' + batchId, 'stored', BATCH_MEMORY_SECONDS);
+}
+
+/**
+ * Returns one JSON response.
+ */
+function json(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Reads the settings a supervisor controls, seeding the sheet with documented
+ * defaults the first time it is asked for. Anything the sheet does not name
+ * falls back to the default, so a deleted row cannot leave a machine without
+ * an answer.
+ */
+function readConfig() {
+  var sheet = getSheet('Config', CONFIG_HEADERS);
+
+  if (sheet.getLastRow() < 2) {
+    sheet.getRange(2, 1, CONFIG_DEFAULTS.length, CONFIG_HEADERS.length).setValues(CONFIG_DEFAULTS);
+  }
+
+  var settings = {};
+  for (var index = 0; index < CONFIG_DEFAULTS.length; index++) {
+    settings[CONFIG_DEFAULTS[index][0]] = CONFIG_DEFAULTS[index][1];
+  }
+
+  var values = sheet.getDataRange().getValues();
+  for (var row = 1; row < values.length; row++) {
+    var key = String(values[row][0]).trim();
+    if (key) {
+      settings[key] = values[row][1];
+    }
+  }
+  return settings;
+}
+
+/**
+ * Answers the plugin's questions: whether a batch it could not read the reply
+ * to was stored, what the supervisor has set, or failing both, that the
+ * collector is reachable and the token is accepted.
+ */
+function doGet(request) {
+  var params = (request && request.parameter) || {};
+
+  if (params.token !== SHARED_TOKEN) {
+    return json({ ok: false, error: 'bad token' });
+  }
+  if (params.batchId) {
+    return json({ ok: true, stored: alreadyStored(params.batchId) });
+  }
+  if (params.bootstrap) {
+    var settings = readConfig();
+    return json({
+      ok: true,
+      enabled: String(settings.enabled).toUpperCase() !== 'FALSE',
+      minVersion: String(settings.minVersion || ''),
+      announcement: String(settings.announcement || '')
+    });
+  }
+  return json({ ok: true });
 }
 
 /**
@@ -206,13 +302,11 @@ function doPost(request) {
     var payload = JSON.parse(request.postData.contents);
 
     if (payload.token !== SHARED_TOKEN) {
-      return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'bad token' }))
-        .setMimeType(ContentService.MimeType.JSON);
+      return json({ ok: false, error: 'bad token' });
     }
 
     if (alreadyStored(payload.batchId)) {
-      return ContentService.createTextOutput(JSON.stringify({ ok: true, accepted: 0, duplicate: true }))
-        .setMimeType(ContentService.MimeType.JSON);
+      return json({ ok: true, accepted: 0, duplicate: true });
     }
 
     var events = payload.events || [];
@@ -254,20 +348,77 @@ function doPost(request) {
     }
 
     updateHeartbeat(payload, rows.length, receivedAt);
+    markStored(payload.batchId);
 
-    return ContentService.createTextOutput(JSON.stringify({ ok: true, accepted: rows.length }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return json({ ok: true, accepted: rows.length });
   } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: String(error) }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return json({ ok: false, error: String(error) });
   } finally {
     lock.releaseLock();
   }
 }
 
 /**
+ * Reports whether this batch contradicts what is already known about who is
+ * reporting: one person sending from two live sessions, or one session
+ * sending under two people. Neither happens while people work normally.
+ */
+function conflictReason(payload, previousRow, receivedAt) {
+  var cache = CacheService.getScriptCache();
+  var sessionKey = 'session_' + payload.sessionId;
+  var sessionOwner = cache.get(sessionKey);
+
+  if (sessionOwner && sessionOwner !== String(payload.userId)) {
+    return 'sessionId ' + payload.sessionId + ' reported by userId ' + payload.userId +
+      ' and by userId ' + sessionOwner;
+  }
+  cache.put(sessionKey, String(payload.userId), BATCH_MEMORY_SECONDS);
+
+  if (!previousRow) {
+    return '';
+  }
+
+  var sameSession = String(previousRow[1]) === String(payload.sessionId);
+  var lastSeen = previousRow[4] ? new Date(previousRow[4]).getTime() : 0;
+  var minutesApart = (receivedAt.getTime() - lastSeen) / 60000;
+
+  if (!sameSession && lastSeen > 0 && minutesApart < CONFLICT_MINUTES) {
+    return 'userId ' + payload.userId + ' reported from two sessions at once: ' +
+      previousRow[1] + ' and ' + payload.sessionId;
+  }
+
+  return '';
+}
+
+/**
+ * Emails the supervisor about a contradiction, rate limited per person, so a
+ * machine stuck in a conflicting state cannot fill an inbox.
+ */
+function reportConflict(userId, reason) {
+  if (ALERT_EMAIL.indexOf('PASTE_') !== -1) {
+    return;
+  }
+
+  var cache = CacheService.getScriptCache();
+  var key = 'conflict_' + userId;
+  if (cache.get(key)) {
+    return;
+  }
+  cache.put(key, '1', 3600);
+
+  MailApp.sendEmail(
+    ALERT_EMAIL,
+    (COMPANY_TAG ? '[' + COMPANY_TAG + '] ' : '') + 'Studio Activity Logger: laporan bertentangan',
+    'Laporan aktivitas bertentangan dengan yang sudah tercatat:\n\n' + reason +
+      '\n\nSatu orang memakai satu Studio dalam satu waktu, jadi salah satu laporan ' +
+      'tidak datang dari mesin yang diakuinya. Periksa tab Heartbeat kolom conflicts.'
+  );
+}
+
+/**
  * Overwrites the sender's heartbeat row so the sheet always shows one line per
- * machine with the time it was last heard from.
+ * machine with the time it was last heard from, and counts every batch that
+ * contradicted what that row already said.
  */
 function updateHeartbeat(payload, accepted, receivedAt) {
   var sheet = getSheet('Heartbeat', HEARTBEAT_HEADERS);
@@ -275,23 +426,33 @@ function updateHeartbeat(payload, accepted, receivedAt) {
 
   for (var row = 1; row < values.length; row++) {
     if (String(values[row][0]) === String(payload.userId)) {
+      var reason = conflictReason(payload, values[row], receivedAt);
+      var conflicts = Number(values[row][7] || 0) + (reason ? 1 : 0);
+
+      if (reason) {
+        reportConflict(payload.userId, reason);
+      }
+
       sheet.getRange(row + 1, 1, 1, HEARTBEAT_HEADERS.length).setValues([[
         cell(payload.userId), cell(payload.sessionId), cell(payload.placeId),
-        cell(payload.placeName), receivedAt, Number(values[row][5] || 0) + accepted
+        cell(payload.placeName), receivedAt, Number(values[row][5] || 0) + accepted,
+        cell(payload.version), conflicts
       ]]);
       return;
     }
   }
 
+  conflictReason(payload, null, receivedAt);
+
   sheet.appendRow([
     cell(payload.userId), cell(payload.sessionId), cell(payload.placeId),
-    cell(payload.placeName), receivedAt, accepted
+    cell(payload.placeName), receivedAt, accepted, cell(payload.version), 0
   ]);
 }
 
 /**
  * Emails the supervisor about every machine that has not reported recently.
- * Attach a time-driven trigger; hourly is enough.
+ * Runs from a time-driven trigger.
  */
 function checkHeartbeats() {
   var sheet = getSheet('Heartbeat', HEARTBEAT_HEADERS);

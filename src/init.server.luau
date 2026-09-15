@@ -7,8 +7,11 @@
 	- Stays idle inside playtest sessions, whose changes are thrown away
 	- Builds the status panel before anything that can fail
 	- Refuses to run on a placeholder or insecure collector address
+	- Settles the collector address before anything is checked against it
+	- Marks the start and the end of the session
+	- Follows the supervisor in holding and releasing delivery
 	- Starts every watcher and reports when none survives
-	- Drives the flush, fold and persist cycle on one timer
+	- Releases folded activity often, delivers it on a slower cadence
 	- Releases everything held when Studio unloads the plugin
 
 	Note: a logger nobody knows has stopped is the same as no logger, so every
@@ -21,15 +24,25 @@ local RunService = game:GetService("RunService")
 
 -- | Modules | --
 local Config = require(script.Config)
+local Deployment = require(script.Deployment)
+local EventLog = require(script.EventLog)
 local StatusUi = require(script.StatusUi)
 local Transport = require(script.Transport)
 local Watchers = require(script.Watchers)
+
+-- | Constants | --
+--[[
+	A session boundary is the plugin reporting itself, so no verdict about who
+	made a change applies to it.
+]]
+local SESSION_DETAIL = { confidence = "", origin = "", via = "" }
 
 -- | Objects | --
 local plugin: Plugin = plugin
 
 -- | State Management | --
 local running = true
+local deliveryHeld = false
 
 
 -- // FUNCTIONS // --
@@ -52,16 +65,45 @@ local function configurationFault(): string?
 end
 
 --[[
-	Delivers queued activity on a fixed cadence for as long as the plugin runs.
+	Follows whatever the supervisor has set since the last reading, and records
+	the moment delivery is held or released so the gap in the sheet has both
+	ends marked.
+]]
+local function followSupervisor()
+	Deployment.Refresh()
+
+	local held = Deployment.IsPaused()
+	if held == deliveryHeld then
+		return
+	end
+
+	deliveryHeld = held
+	EventLog.Write(if held then "loggingPaused" else "loggingResumed", Config.VERSION, SESSION_DETAIL)
+	Transport.SetPaused(held)
+end
+
+--[[
+	Releases folded activity and delivers it for as long as the plugin runs.
+	The release turn comes far more often than delivery, since one cadence for
+	both would widen every folding window to the delivery interval.
 ]]
 local function runMaintenanceLoop()
+	local lastFlushClock = 0
+
 	while running do
-		task.wait(Config.FLUSH_INTERVAL_SECONDS)
+		task.wait(Config.TICK_INTERVAL_SECONDS)
 		if not running then
 			break
 		end
+
 		Watchers.Tick()
-		Transport.Flush()
+		followSupervisor()
+
+		if os.clock() - lastFlushClock >= Config.FLUSH_INTERVAL_SECONDS then
+			lastFlushClock = os.clock()
+			Transport.Flush()
+		end
+
 		Transport.Persist(plugin)
 	end
 end
@@ -73,6 +115,7 @@ if not RunService:IsEdit() then
 end
 
 StatusUi.Build(plugin)
+Deployment.Resolve(plugin)
 
 local fault = configurationFault()
 if fault then
@@ -84,6 +127,8 @@ end
 Transport.Start(plugin)
 Transport.OnHealthChanged(StatusUi.Render)
 
+EventLog.Write("sessionStart", Config.VERSION, SESSION_DETAIL)
+
 local watcherCount = Watchers.Start()
 if watcherCount == 0 then
 	StatusUi.ShowFatal("Tidak ada watcher yang berhasil dijalankan. Aktivitas tidak terekam sama sekali.")
@@ -93,12 +138,15 @@ end
 
 task.spawn(runMaintenanceLoop)
 task.spawn(function()
+	followSupervisor()
 	Transport.Flush(true)
 end)
 
 plugin.Unloading:Connect(function()
 	running = false
+	EventLog.Write("sessionEnd", Config.VERSION, SESSION_DETAIL)
 	Watchers.Stop()
+	Transport.Persist(plugin, true)
 	Transport.Flush(true)
 	Transport.Stop(plugin)
 end)

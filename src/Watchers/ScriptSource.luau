@@ -50,8 +50,6 @@ local capReported = false
 
 	A person works through one script at a time, so a wide run is the shape of
 	a tool rewriting the place rather than someone editing it.
-
-	@param path string -- the script just rewritten
 ]]
 local function checkForBulkRun(path: string)
 	local now = os.clock()
@@ -90,9 +88,6 @@ end
 --[[
 	Reports whether Studio's own file sync keeps a script in step with a file
 	on disk.
-
-	@param container LuaSourceContainer -- the script to check
-	@return boolean -- whether its code comes from a synced file
 ]]
 local function syncedFromFile(container: LuaSourceContainer): boolean
 	local status = Safe.Value(function()
@@ -104,8 +99,6 @@ end
 
 --[[
 	Releases one folded run of rewrites to a single script.
-
-	@param entry {[string]: any} -- the folded run
 ]]
 local function release(entry: { [string]: any })
 	EventLog.WriteFolded("scriptSource", entry.path, entry, {
@@ -119,8 +112,6 @@ end
 
 --[[
 	Begins watching one script for code it did not receive by hand.
-
-	@param container LuaSourceContainer -- the script to watch
 ]]
 local function watch(container: LuaSourceContainer)
 	if connections[container] then
@@ -177,8 +168,6 @@ end
 --[[
 	Stops watching a script that has left the place, freeing its slot for the
 	scripts that remain.
-
-	@param container LuaSourceContainer -- the script that left
 ]]
 local function unwatch(container: LuaSourceContainer)
 	local connection = connections[container]

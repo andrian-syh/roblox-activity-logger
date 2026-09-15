@@ -7,7 +7,9 @@
 	- Watches every property of a selected instance through one subscription
 	- Handles a single-value container, which reports values not names
 	- Reports attribute changes alongside properties
-	- Folds a run of changes to one property into a single entry
+	- Folds a run of changes to one instance into a single entry
+	- Leads that entry with the changed property readers care about most
+	- Reads the properties people edit, so the first change knows its old value
 	- Includes descendants only while the selection stays small
 
 	Note: watching the whole place would cost one subscription per instance
@@ -39,68 +41,92 @@ local edits
 
 -- // FUNCTIONS // --
 --[[
-	Counts one more change into a run already in progress.
+	Names the change a reader is most likely to have meant, when one gesture
+	changed several properties at once.
 
-	@param entry {[string]: any} -- the run being extended
+	@return string -- the leading property, first in the order of interest
 ]]
-local function bump(entry: { [string]: any })
-	entry.count += 1
+local function leadingProperty(changed: { string }): string
+	for _, candidate in Config.SNAPSHOT_PROPERTIES do
+		if table.find(changed, candidate) then
+			return candidate
+		end
+	end
+	return changed[1]
 end
 
 --[[
-	Releases one folded run of changes to a single property, reading the value
-	the run settled on.
-
-	@param entry {[string]: any} -- the folded run
+	Releases one folded run of changes to one instance, reading the values the
+	run settled on. One gesture moves, turns and resizes at once, so it is
+	reported once, led by the property that says the most.
 ]]
 local function release(entry: { [string]: any })
-	local settled = Naming.DescribeProperty(entry.instance, entry.property)
-	entry.previousValues[entry.property] = settled
+	local leading = leadingProperty(entry.changed)
+	local settled = Naming.DescribeProperty(entry.instance, leading)
+
+	local ordered = { leading }
+	for _, property in entry.changed do
+		entry.previousValues[property] = Naming.DescribeProperty(entry.instance, property)
+		if property ~= leading then
+			table.insert(ordered, property)
+		end
+	end
 
 	EventLog.WriteFolded("property", entry.path, entry, {
 		className = entry.className,
-		property = entry.property,
-		oldValue = entry.from,
+		property = table.concat(ordered, ", "),
+		oldValue = entry.before[leading],
 		newValue = settled,
 		amount = entry.count,
 	})
 end
 
 --[[
-	Watches every property and attribute of one instance.
-
-	Dragging fires a change every frame for every selected part, so a change
+	Watches every property and attribute of one instance, reading up front the
+	values people edit, so their first change knows what it replaced. A change
 	that extends a run already open does no reading or naming at all.
-
-	@param instance Instance -- the instance to watch
 ]]
 local function watch(instance: Instance)
 	local path = Naming.PathOf(instance)
-	local keys = {}
 	local previousValues = {}
 
-	local function note(property: string)
-		local key = keys[property]
-		if not key then
-			key = path .. "|" .. property
-			keys[property] = key
+	for _, property in Config.SNAPSHOT_PROPERTIES do
+		local value = Safe.Property(instance, property)
+		if value ~= nil then
+			previousValues[property] = Naming.Describe(value)
 		end
+	end
 
-		if edits:Touch(key, bump) then
+	local pending = ""
+
+	local function fold(entry: { [string]: any })
+		entry.count += 1
+		if entry.before[pending] == nil then
+			entry.before[pending] = previousValues[pending] or "<unknown>"
+			table.insert(entry.changed, pending)
+		end
+	end
+
+	local function note(property: string)
+		pending = property
+
+		if edits:Touch(path, fold) then
 			return
 		end
 
-		edits:Add(key, function()
-			return EventLog.Stamp({
+		edits:Add(path, function()
+			local entry = EventLog.Stamp({
 				instance = instance,
 				path = path,
-				property = property,
 				className = instance.ClassName,
-				from = previousValues[property] or "<unknown>",
 				previousValues = previousValues,
-				count = 1,
+				before = {},
+				changed = {},
+				count = 0,
 			})
-		end, bump)
+			fold(entry)
+			return entry
+		end, fold)
 	end
 
 	if instance:IsA("ValueBase") then
@@ -108,7 +134,6 @@ local function watch(instance: Instance)
 			return instance:GetPropertyChangedSignal("Value")
 		end)
 		if signal then
-			previousValues.Value = Naming.DescribeProperty(instance, "Value")
 			selectionBin:Add(signal:Connect(Safe.Handler("ValueChanged", function()
 				note("Value")
 			end)))
@@ -119,8 +144,8 @@ local function watch(instance: Instance)
 				return
 			end
 			if property == "Name" then
+				edits:Release(path)
 				path = Naming.PathOf(instance)
-				table.clear(keys)
 			end
 			note(property)
 		end)))
@@ -143,8 +168,6 @@ end
 
 	Descendants are included only while the selection stays small enough to
 	afford them, so selecting a whole service costs almost nothing.
-
-	@return {Instance} -- the instances to subscribe to
 ]]
 local function selectionTargets(): { Instance }
 	local targets = {}

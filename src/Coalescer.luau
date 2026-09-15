@@ -37,7 +37,6 @@ Coalescer.__index = Coalescer
 
 	@param window number -- seconds of quiet before an entry is released
 	@param release (Entry) -> () -- receives each released entry
-	@return Coalescer -- a coalescer holding nothing
 ]]
 function Coalescer.new(window: number, release: (Entry) -> ()): Coalescer
 	return setmetatable({
@@ -107,8 +106,6 @@ end
 
 --[[
 	Releases one subject's entry now, if it is holding one.
-
-	@param key string -- the subject to release
 ]]
 function Coalescer:Release(key: string)
 	local entry = self._entries[key]
