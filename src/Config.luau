@@ -35,7 +35,7 @@ Config.VERSION = "1.3.0"
 	The company tag shown in brackets before the plugin name wherever the
 	plugin names itself. Leave it empty to show the plugin name alone.
 ]]
-Config.COMPANY_TAG = "UNICTIVE"
+Config.COMPANY_TAG = ""
 Config.PRODUCT_NAME = "Studio Activity Logger"
 Config.DISPLAY_NAME = if Config.COMPANY_TAG == ""
 	then Config.PRODUCT_NAME

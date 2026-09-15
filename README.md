@@ -1,4 +1,4 @@
-# [UNICTIVE] Studio Activity Logger
+# Studio Activity Logger
 
 Internal tool. Records what each developer does in Roblox Studio and sends it to one shared Google Sheet, so a change nobody admits to can be traced back to a machine.
 
@@ -9,7 +9,7 @@ Internal tool. Records what each developer does in Roblox Studio and sends it to
 | **Stores data in** | Google Sheet, via a Google Apps Script web app |
 | **Audience** | Developers (install), supervisors and PMs (read the sheet), maintainers (build and change) |
 
-The bracketed company tag is set by `Config.COMPANY_TAG`. It appears in the toolbar, the status panel title, Output warnings and the alert email.
+A company tag can be set in `Config.COMPANY_TAG` and in the collector's `COMPANY_TAG`. When set, it appears in brackets before the plugin name in the toolbar, the status panel title, Output warnings and the alert email. It ships empty, so the plugin names itself alone until a maintainer sets it.
 
 ---
 

@@ -37,7 +37,7 @@ reject_unsafe() {
 	esac
 }
 
-printf '\n[UNICTIVE] Studio Activity Logger\n\n'
+printf '\nStudio Activity Logger\n\n'
 
 if [ ! -t 0 ]; then
 	fail 'Skrip ini butuh input. Jalankan dengan: bash -c "$(curl -fsSL <url>)"'

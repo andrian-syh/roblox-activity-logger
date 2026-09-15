@@ -21,7 +21,7 @@
  * redistributing the plugin.
  */
 
-var COMPANY_TAG = 'UNICTIVE';
+var COMPANY_TAG = '';
 var SHARED_TOKEN = 'PASTE_SHARED_TOKEN_HERE';
 var ALERT_EMAIL = 'PASTE_SUPERVISOR_EMAIL_HERE';
 var SILENT_MINUTES = 120;

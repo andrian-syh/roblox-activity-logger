@@ -43,13 +43,13 @@ function XmlEscape($text) {
 # A quote or a backslash would end or escape the Luau string the value is
 # written into, whatever the XML around it says.
 function RejectUnsafe($text, $what) {
-    if ($text -match '["\]') {
+    if ($text.Contains('"') -or $text.Contains('\')) {
         Fail "$what tidak boleh memuat tanda kutip atau garis miring terbalik."
     }
 }
 
 Write-Host ''
-Write-Host '[UNICTIVE] Studio Activity Logger' -ForegroundColor Cyan
+Write-Host 'Studio Activity Logger' -ForegroundColor Cyan
 Write-Host ''
 
 # A plugin file replaced underneath a running Studio is either locked or simply
@@ -87,7 +87,7 @@ $collectorUrl = (Read-Host $urlPrompt).Trim()
 if (-not $collectorUrl) { $collectorUrl = $existingUrl }
 if (-not $collectorUrl) { Fail 'URL collector wajib diisi.' }
 if ($collectorUrl -notmatch '^https://') { Fail 'URL collector harus memakai https.' }
-RejectUnsafe $collectorUrl 'URL collector' 
+RejectUnsafe $collectorUrl 'URL collector'
 
 $tokenPrompt = if ($existingToken) { 'Shared token (Enter untuk memakai yang lama)' } else { 'Shared token' }
 $tokenSecure = Read-Host $tokenPrompt -AsSecureString
@@ -96,7 +96,7 @@ $sharedToken = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
 ).Trim()
 if (-not $sharedToken) { $sharedToken = $existingToken }
 if (-not $sharedToken) { Fail 'Shared token wajib diisi.' }
-RejectUnsafe $sharedToken 'Shared token' 
+RejectUnsafe $sharedToken 'Shared token'
 
 # Proving the address before writing anything turns a typo into a message here
 # rather than a machine that silently never reports.
