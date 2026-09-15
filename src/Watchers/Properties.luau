@@ -39,81 +39,90 @@ local edits
 
 -- // FUNCTIONS // --
 --[[
-	Releases one folded run of changes to a single property.
+	Counts one more change into a run already in progress.
+
+	@param entry {[string]: any} -- the run being extended
+]]
+local function bump(entry: { [string]: any })
+	entry.count += 1
+end
+
+--[[
+	Releases one folded run of changes to a single property, reading the value
+	the run settled on.
 
 	@param entry {[string]: any} -- the folded run
 ]]
 local function release(entry: { [string]: any })
+	local settled = Naming.DescribeProperty(entry.instance, entry.property)
+	entry.previousValues[entry.property] = settled
+
 	EventLog.WriteFolded("property", entry.path, entry, {
 		className = entry.className,
 		property = entry.property,
 		oldValue = entry.from,
-		newValue = entry.to,
+		newValue = settled,
 		amount = entry.count,
 	})
 end
 
 --[[
-	Records one property change, folding it into any run already in progress.
-
-	@param instance Instance -- the instance that changed
-	@param property string -- the property that changed
-	@param before string? -- the value held before the run began
-]]
-local function note(instance: Instance, property: string, before: string?)
-	if Config.DERIVED_PROPERTIES[property] then
-		return
-	end
-
-	local path = Naming.PathOf(instance)
-
-	edits:Add(path .. "|" .. property, function()
-		return {
-			path = path,
-			property = property,
-			className = instance.ClassName,
-			from = before or "<unknown>",
-			to = Naming.DescribeProperty(instance, property),
-			count = 1,
-			via = EventLog.Transaction(),
-			confidence = Authorship.Verdict(),
-		}
-	end, function(entry)
-		entry.to = Naming.DescribeProperty(instance, property)
-		entry.count += 1
-	end)
-end
-
---[[
 	Watches every property and attribute of one instance.
 
-	A container of a single value reports that value rather than a property
-	name, so it is subscribed to on its own terms.
+	Dragging fires a change every frame for every selected part, so a change
+	that extends a run already open does no reading or naming at all.
 
 	@param instance Instance -- the instance to watch
 ]]
 local function watch(instance: Instance)
-	Naming.PathOf(instance)
+	local path = Naming.PathOf(instance)
+	local keys = {}
+	local previousValues = {}
+
+	local function note(property: string)
+		local key = keys[property]
+		if not key then
+			key = path .. "|" .. property
+			keys[property] = key
+		end
+
+		if edits:Touch(key, bump) then
+			return
+		end
+
+		edits:Add(key, function()
+			return EventLog.Stamp({
+				instance = instance,
+				path = path,
+				property = property,
+				className = instance.ClassName,
+				from = previousValues[property] or "<unknown>",
+				previousValues = previousValues,
+				count = 1,
+			})
+		end, bump)
+	end
 
 	if instance:IsA("ValueBase") then
 		local signal = Safe.Value(function()
 			return instance:GetPropertyChangedSignal("Value")
 		end)
 		if signal then
-			local previous = Naming.DescribeProperty(instance, "Value")
+			previousValues.Value = Naming.DescribeProperty(instance, "Value")
 			selectionBin:Add(signal:Connect(Safe.Handler("ValueChanged", function()
-				note(instance, "Value", previous)
-				previous = Naming.DescribeProperty(instance, "Value")
+				note("Value")
 			end)))
 		end
 	else
-		local previousValues = {}
 		selectionBin:Add(instance.Changed:Connect(Safe.Handler("Changed", function(property: string)
 			if Config.DERIVED_PROPERTIES[property] then
 				return
 			end
-			note(instance, property, previousValues[property])
-			previousValues[property] = Naming.DescribeProperty(instance, property)
+			if property == "Name" then
+				path = Naming.PathOf(instance)
+				table.clear(keys)
+			end
+			note(property)
 		end)))
 	end
 
@@ -133,7 +142,7 @@ end
 	Collects the instances worth watching for the current selection.
 
 	Descendants are included only while the selection stays small enough to
-	afford them, so selecting a whole service costs nothing but their names.
+	afford them, so selecting a whole service costs almost nothing.
 
 	@return {Instance} -- the instances to subscribe to
 ]]
@@ -154,8 +163,6 @@ local function selectionTargets(): { Instance }
 			for _, descendant in descendants do
 				table.insert(targets, descendant)
 			end
-		else
-			Naming.Remember(instance)
 		end
 	end
 

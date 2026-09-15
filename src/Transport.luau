@@ -4,6 +4,7 @@
 	Holds activity until the collector accepts it, and reports the health of
 	that delivery.
 
+	- Stamps each event with the place, session and user it happened in
 	- Queues events and discards the oldest only when full
 	- Delivers in batches, retrying with a widening back-off
 	- Keeps one batch identity across retries so nothing is stored twice
@@ -53,6 +54,10 @@ local persistedAnything = false
 local sessionId = HttpService:GenerateGUID(false)
 local pendingBatchId = ""
 local placeName = game.Name
+local placeNameResolved = false
+local userId = Safe.Value(function()
+	return StudioService:GetUserId()
+end) or 0
 
 local health: Health = {
 	Healthy = true,
@@ -143,6 +148,7 @@ end
 	is called, so the real one has to be asked for.
 ]]
 local function resolvePlaceName()
+	placeNameResolved = true
 	if game.PlaceId == 0 then
 		return
 	end
@@ -173,7 +179,7 @@ local function deliver(batch: { any }, batchId: string): (boolean, string)
 			version = Config.VERSION,
 			batchId = batchId,
 			sessionId = sessionId,
-			userId = StudioService:GetUserId(),
+			userId = userId,
 			placeId = game.PlaceId,
 			placeName = placeName,
 			sentAtEpoch = os.time(),
@@ -208,14 +214,19 @@ local function deliver(batch: { any }, batchId: string): (boolean, string)
 end
 
 --[[
-	Queues one event for delivery.
+	Queues one event, stamped with its own place, session and user, since the
+	queue can be delivered later from another place.
 
-	At capacity the oldest events are discarded and the loss is reported,
-	never hidden.
+	At capacity the oldest events are discarded and the loss is reported.
 
 	@param event {[string]: any} -- the event to deliver
 ]]
 function Transport.Push(event: { [string]: any })
+	event.placeId = game.PlaceId
+	event.placeName = placeName
+	event.sessionId = sessionId
+	event.userId = userId
+
 	if #queue >= Config.QUEUE_CAPACITY then
 		table.remove(queue, 1)
 		droppedCount += 1
@@ -244,9 +255,19 @@ function Transport.Flush(force: boolean?)
 
 	sending = true
 
+	if not placeNameResolved then
+		resolvePlaceName()
+	end
+
 	local batchSize = math.min(#queue, Config.BATCH_LIMIT)
 	local batch = table.move(queue, 1, batchSize, 1, {})
 	queue = table.move(queue, batchSize + 1, #queue, 1, {})
+
+	for _, event in batch do
+		if event.placeId == game.PlaceId then
+			event.placeName = placeName
+		end
+	end
 
 	if pendingBatchId == "" then
 		pendingBatchId = HttpService:GenerateGUID(false)
@@ -333,7 +354,6 @@ end
 ]]
 function Transport.Start(plugin: Plugin)
 	restoreQueue(plugin)
-	task.spawn(resolvePlaceName)
 	publishHealth()
 end
 

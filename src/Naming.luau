@@ -5,7 +5,6 @@
 
 	- Names an instance still in the tree and remembers the name
 	- Names an instance that has already left the tree
-	- Remembers the names of a whole subtree ahead of time
 	- Forgets an instance so a reused reference inherits no stale name
 	- Renders a value or a property, trimmed to a readable length
 	- Flattens typed text into a single-line preview
@@ -61,26 +60,6 @@ function Naming.RemovedPathOf(instance: Instance): string
 		return instance:GetFullName()
 	end)
 	return typeof(path) == "string" and path or "<unknown>"
-end
-
---[[
-	Remembers the names of an instance and everything beneath it.
-
-	@param instance Instance -- the subtree root to remember
-]]
-function Naming.Remember(instance: Instance)
-	Naming.PathOf(instance)
-
-	local descendants = Safe.Value(function()
-		return instance:GetDescendants()
-	end)
-	if typeof(descendants) ~= "table" then
-		return
-	end
-
-	for _, descendant in descendants do
-		Naming.PathOf(descendant)
-	end
 end
 
 --[[

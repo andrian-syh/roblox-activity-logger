@@ -27,7 +27,7 @@ var EVENT_HEADERS = [
   'receivedAt', 'eventAt', 'userId', 'sessionId', 'placeId', 'placeName',
   'mode', 'kind', 'summary', 'target', 'className', 'confidence', 'via',
   'property', 'oldValue', 'newValue', 'amount', 'location', 'preview',
-  'fingerprint'
+  'fingerprint', 'origin'
 ];
 
 var HEARTBEAT_HEADERS = [
@@ -84,9 +84,21 @@ function summaryFor(event) {
     case 'sessionEnd':
       return 'Closed the place';
     case 'added':
-      return 'Created ' + (event.className || 'instance') + ' "' + leaf + '"';
     case 'removed':
-      return 'Deleted ' + (event.className || 'instance') + ' "' + leaf + '"';
+      var verb = event.kind === 'added' ? 'Created ' : 'Deleted ';
+      if (event.operation === 'burst') {
+        return verb + amount + ' more instances in the same operation, starting with "' + leaf + '"';
+      }
+      return verb + (event.className || 'instance') + ' "' + leaf + '"' +
+        (amount > 0 ? ' with ' + amount + ' nested instance' + (amount === 1 ? '' : 's') : '');
+    case 'restored':
+      return 'Restored ' + (event.className || 'instance') + ' "' + leaf + '" after removing it' +
+        (amount > 0 ? ' with ' + amount + ' nested instance' + (amount === 1 ? '' : 's') : '');
+    case 'moved':
+      return (event.operation === 'cutPaste' ? 'Cut and pasted ' : 'Moved ') +
+        (event.className || 'instance') + ' "' + leaf + '" from ' +
+        (event.oldValue || 'unknown') + ' to ' + (event.newValue || 'unknown') +
+        (amount > 0 ? ' with ' + amount + ' nested instance' + (amount === 1 ? '' : 's') : '');
     case 'selection':
       if (amount === 0) {
         return 'Cleared the selection';
@@ -115,6 +127,12 @@ function summaryFor(event) {
       return 'Undid: ' + event.target;
     case 'redo':
       return 'Redid: ' + event.target;
+    case 'collaboratorJoined':
+      return 'Collaborator ' + event.target +
+        (event.operation === 'present' ? ' was already editing' : ' joined') +
+        ' (' + amount + ' other editor' + (amount === 1 ? '' : 's') + ' now)';
+    case 'collaboratorLeft':
+      return 'Collaborator ' + event.target + ' left (' + amount + ' other editor' + (amount === 1 ? '' : 's') + ' now)';
     default:
       return event.kind + (event.target ? ' on ' + event.target : '');
   }
@@ -137,7 +155,9 @@ function fingerprintOf(event) {
 }
 
 /**
- * Returns a sheet with the given headers, creating it on first use.
+ * Returns a sheet with the given headers, creating it on first use. A tab made
+ * by an older deployment with fewer columns gets its header and filter
+ * extended, so new columns are labelled without deleting any rows.
  */
 function getSheet(name, headers) {
   var book = SpreadsheetApp.getActiveSpreadsheet();
@@ -147,6 +167,13 @@ function getSheet(name, headers) {
     sheet.appendRow(headers);
     sheet.setFrozenRows(1);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    sheet.getRange(1, 1, sheet.getMaxRows(), headers.length).createFilter();
+  } else if (sheet.getLastColumn() < headers.length) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+    var filter = sheet.getFilter();
+    if (filter) {
+      filter.remove();
+    }
     sheet.getRange(1, 1, sheet.getMaxRows(), headers.length).createFilter();
   }
   return sheet;
@@ -194,13 +221,15 @@ function doPost(request) {
 
     for (var index = 0; index < events.length; index++) {
       var event = events[index];
+      var placeId = event.placeId === undefined ? payload.placeId : event.placeId;
+      var samePlace = String(placeId) === String(payload.placeId);
       rows.push([
         receivedAt,
         event.epoch ? new Date(event.epoch * 1000) : '',
-        cell(payload.userId),
-        cell(payload.sessionId),
-        cell(payload.placeId),
-        cell(payload.placeName),
+        cell(event.userId === undefined ? payload.userId : event.userId),
+        cell(event.sessionId || payload.sessionId),
+        cell(placeId),
+        cell(samePlace ? payload.placeName : event.placeName),
         cell(event.mode),
         cell(event.kind),
         cell(summaryFor(event)),
@@ -214,7 +243,8 @@ function doPost(request) {
         event.amount === undefined || event.amount === null ? '' : Number(event.amount),
         cell(event.location),
         cell(event.preview),
-        cell(fingerprintOf(event))
+        cell(fingerprintOf(event)),
+        cell(event.origin)
       ]);
     }
 

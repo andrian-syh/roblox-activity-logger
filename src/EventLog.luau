@@ -3,7 +3,8 @@
 
 	Builds activity events in one shape and hands them to the transport.
 
-	- Stamps time, mode, transaction and verdict on every event
+	- Stamps time, mode, transaction, verdict and origin on every event
+	- Stamps the same onto an entry that will be written later
 	- Records one event reported as it happens
 	- Records one event folded from a burst, keeping its own verdict
 	- Names the change transaction that later events belong to
@@ -31,6 +32,7 @@ export type Detail = {
 	preview: string?,
 	operation: string?,
 	confidence: string?,
+	origin: string?,
 	via: string?,
 }
 
@@ -70,6 +72,18 @@ function EventLog.Transaction(): string
 end
 
 --[[
+	Stamps the transaction, verdict and origin for a change happening now onto
+	an entry that will be written later.
+
+	@param entry {[string]: any} -- the entry to stamp
+	@return {[string]: any} -- the same entry
+]]
+function EventLog.Stamp(entry: { [string]: any }): { [string]: any }
+	entry.confidence, entry.origin, entry.via = Authorship.Classify(recordingLabel)
+	return entry
+end
+
+--[[
 	Records one activity event.
 
 	@param kind string -- the activity category
@@ -77,14 +91,16 @@ end
 	@param detail Detail? -- fields specific to this category
 ]]
 function EventLog.Write(kind: string, target: string, detail: Detail?)
+	local confidence, origin, via = Authorship.Classify(recordingLabel)
 	local event: { [string]: any } = {
 		epoch = os.time(),
 		clock = os.clock(),
 		kind = kind,
 		target = target,
 		mode = currentMode(),
-		via = recordingLabel,
-		confidence = Authorship.Verdict(),
+		via = via,
+		confidence = confidence,
+		origin = origin,
 	}
 
 	if detail then
@@ -107,14 +123,16 @@ end
 	@param detail Detail -- fields specific to this category
 ]]
 function EventLog.WriteFolded(kind: string, target: string, entry: { [string]: any }, detail: Detail)
+	local confidence, origin, via = Authorship.Classify(recordingLabel)
 	local event: { [string]: any } = {
-		epoch = os.time(),
+		epoch = entry._epoch or os.time(),
 		clock = entry._clock or os.clock(),
 		kind = kind,
 		target = target,
 		mode = currentMode(),
-		via = entry.via or "",
-		confidence = entry.confidence or Authorship.Verdict(),
+		via = entry.via or via,
+		confidence = entry.confidence or confidence,
+		origin = entry.origin or origin,
 	}
 
 	for key, value in detail :: any do
@@ -122,6 +140,7 @@ function EventLog.WriteFolded(kind: string, target: string, entry: { [string]: a
 	end
 
 	Transport.Push(event)
+	Authorship.Hold(event)
 end
 
 return EventLog

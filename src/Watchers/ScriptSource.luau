@@ -5,17 +5,20 @@
 	one person silently replaces another.
 
 	- Watches every script in the place, not only the selected ones
+	- Releases a script's watch when it leaves, so churn cannot exhaust the cap
 	- Ignores a change while its script is being typed into
 	- Folds a run of rewrites into one entry per script
+	- Credits code kept in step with a file on disk to the sync tool
 	- Raises an alarm when a run spans many scripts at once
 
 	Note: the scripts most at risk are exactly the ones nobody has open.
 ]]
 
 -- // VARIABLES // --
+-- | Services | --
+local InstanceFileSyncService = game:GetService("InstanceFileSyncService")
+
 -- | Modules | --
-local Authorship = require(script.Parent.Parent.Authorship)
-local Bin = require(script.Parent.Parent.Bin)
 local Coalescer = require(script.Parent.Parent.Coalescer)
 local Config = require(script.Parent.Parent.Config)
 local Editor = require(script.Parent.Editor)
@@ -24,17 +27,21 @@ local Naming = require(script.Parent.Parent.Naming)
 local Safe = require(script.Parent.Parent.Safe)
 local Structure = require(script.Parent.Structure)
 
+-- | Constants | --
+local SCRIPT_SYNC_LABEL = "Script Sync"
+
 -- | State Management | --
 local ScriptSource = {}
 
 ScriptSource.Name = "ScriptSource"
 
-local bin = Bin.new()
 local writes
-local watched = setmetatable({}, { __mode = "k" })
-local lengths = setmetatable({}, { __mode = "k" })
+local connections: { [LuaSourceContainer]: RBXScriptConnection } = {}
+local watchedCount = 0
+local lengths = {}
 local recentWrites = {}
 local alarmRaised = false
+local capReported = false
 
 
 -- // FUNCTIONS // --
@@ -81,6 +88,21 @@ local function checkForBulkRun(path: string)
 end
 
 --[[
+	Reports whether Studio's own file sync keeps a script in step with a file
+	on disk.
+
+	@param container LuaSourceContainer -- the script to check
+	@return boolean -- whether its code comes from a synced file
+]]
+local function syncedFromFile(container: LuaSourceContainer): boolean
+	local status = Safe.Value(function()
+		return InstanceFileSyncService:GetStatus(container)
+	end)
+	return status == Enum.InstanceFileSyncStatus.SyncedAsRoot
+		or status == Enum.InstanceFileSyncStatus.SyncedAsDescendant
+end
+
+--[[
 	Releases one folded run of rewrites to a single script.
 
 	@param entry {[string]: any} -- the folded run
@@ -101,13 +123,16 @@ end
 	@param container LuaSourceContainer -- the script to watch
 ]]
 local function watch(container: LuaSourceContainer)
-	if watched[container] or bin:Count() >= Config.MAX_WATCHED_SCRIPTS then
+	if connections[container] then
 		return
 	end
-	watched[container] = true
-
-	local initial = Safe.Property(container, "Source")
-	lengths[container] = typeof(initial) == "string" and #initial or 0
+	if watchedCount >= Config.MAX_WATCHED_SCRIPTS then
+		if not capReported then
+			capReported = true
+			warn(string.format("%s: more than %d scripts, the rest are not watched", Config.DISPLAY_NAME, Config.MAX_WATCHED_SCRIPTS))
+		end
+		return
+	end
 
 	local signal = Safe.Value(function()
 		return container:GetPropertyChangedSignal("Source")
@@ -116,7 +141,11 @@ local function watch(container: LuaSourceContainer)
 		return
 	end
 
-	bin:Add(signal:Connect(Safe.Handler("SourceChanged", function()
+	local initial = Safe.Property(container, "Source")
+	lengths[container] = typeof(initial) == "string" and #initial or 0
+
+	watchedCount += 1
+	connections[container] = signal:Connect(Safe.Handler("SourceChanged", function()
 		local current = Safe.Property(container, "Source")
 		local before = lengths[container] or 0
 		local after = typeof(current) == "string" and #current or 0
@@ -128,18 +157,38 @@ local function watch(container: LuaSourceContainer)
 
 		local path = Naming.PathOf(container)
 		writes:Add(path, function()
-			return {
+			local entry = EventLog.Stamp({
 				path = path,
 				className = container.ClassName,
 				from = before,
 				to = after,
-				via = EventLog.Transaction(),
-				confidence = Authorship.Verdict(),
-			}
+			})
+			if syncedFromFile(container) then
+				entry.origin = "tool"
+				entry.via = SCRIPT_SYNC_LABEL
+			end
+			return entry
 		end, function(entry)
 			entry.to = after
 		end)
-	end)))
+	end))
+end
+
+--[[
+	Stops watching a script that has left the place, freeing its slot for the
+	scripts that remain.
+
+	@param container LuaSourceContainer -- the script that left
+]]
+local function unwatch(container: LuaSourceContainer)
+	local connection = connections[container]
+	if not connection then
+		return
+	end
+	connection:Disconnect()
+	connections[container] = nil
+	lengths[container] = nil
+	watchedCount -= 1
 end
 
 --[[
@@ -151,6 +200,12 @@ function ScriptSource.Start()
 	Structure.OnInstanceAdded(function(instance: Instance)
 		if instance:IsA("LuaSourceContainer") then
 			watch(instance)
+		end
+	end)
+
+	Structure.OnInstanceRemoved(function(instance: Instance)
+		if instance:IsA("LuaSourceContainer") then
+			unwatch(instance)
 		end
 	end)
 
@@ -183,7 +238,12 @@ function ScriptSource.Stop()
 	if writes then
 		writes:Drain(true)
 	end
-	bin:Clear()
+	for _, connection in connections do
+		connection:Disconnect()
+	end
+	table.clear(connections)
+	table.clear(lengths)
+	watchedCount = 0
 	table.clear(recentWrites)
 	alarmRaised = false
 end

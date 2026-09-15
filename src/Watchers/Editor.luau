@@ -7,6 +7,7 @@
 	- Reports a script opening and closing in the editor
 	- Folds typing into one entry per script, with line range and preview
 	- Releases the entry for a script as soon as its document closes
+	- Remembers each document's script, since a closed document can no longer say
 	- Reports whether a script is being typed into right now
 
 	Note: the editor is the only place a person types code, so everything it
@@ -34,6 +35,7 @@ Editor.Name = "Editor"
 local bin = Bin.new()
 local edits
 local openScripts = setmetatable({}, { __mode = "k" })
+local documentScripts = setmetatable({}, { __mode = "k" })
 local lastTypedClock = setmetatable({}, { __mode = "k" })
 
 
@@ -72,6 +74,7 @@ local function note(container: LuaSourceContainer, changes: any)
 			lastLine = 0,
 			preview = "",
 			confidence = "authored",
+			origin = "user",
 			via = "",
 		}
 	end, function(entry)
@@ -112,6 +115,26 @@ local function flushScript(container: LuaSourceContainer)
 end
 
 --[[
+	Finds the script behind an open editor document, remembering it so the
+	document can still be named once it has closed.
+
+	@param document ScriptDocument -- an open document
+	@return LuaSourceContainer? -- the script, or nil for the command bar
+]]
+local function scriptOf(document: ScriptDocument): LuaSourceContainer?
+	local known = documentScripts[document]
+	if known then
+		return known
+	end
+	if document:IsCommandBar() then
+		return nil
+	end
+	local container = document:GetScript()
+	documentScripts[document] = container
+	return container
+end
+
+--[[
 	Reports whether a script is open and being typed into right now.
 
 	@param container LuaSourceContainer -- the script to test
@@ -135,10 +158,7 @@ function Editor.Start()
 	edits = Coalescer.new(Config.SCRIPT_EDIT_COALESCE_SECONDS, release)
 
 	bin:Add(ScriptEditorService.TextDocumentDidOpen:Connect(Safe.Handler("TextDocumentDidOpen", function(document)
-		if document:IsCommandBar() then
-			return
-		end
-		local container = document:GetScript()
+		local container = scriptOf(document)
 		if not container then
 			return
 		end
@@ -151,10 +171,7 @@ function Editor.Start()
 	bin:Add(
 		ScriptEditorService.TextDocumentDidChange:Connect(
 			Safe.Handler("TextDocumentDidChange", function(document, changes)
-				if document:IsCommandBar() then
-					return
-				end
-				local container = document:GetScript()
+				local container = scriptOf(document)
 				if not container then
 					return
 				end
@@ -166,10 +183,8 @@ function Editor.Start()
 	)
 
 	bin:Add(ScriptEditorService.TextDocumentDidClose:Connect(Safe.Handler("TextDocumentDidClose", function(document)
-		if document:IsCommandBar() then
-			return
-		end
-		local container = document:GetScript()
+		local container = documentScripts[document]
+		documentScripts[document] = nil
 		if not container then
 			return
 		end
@@ -178,6 +193,16 @@ function Editor.Start()
 		EventLog.Write("scriptClose", Naming.PathOf(container), { className = container.ClassName })
 		Authorship.Prove()
 	end)))
+
+	local documents = Safe.Value(function()
+		return ScriptEditorService:GetScriptDocuments()
+	end)
+	for _, document in documents or {} do
+		local container = Safe.Value(scriptOf, document)
+		if container then
+			openScripts[container] = true
+		end
+	end
 end
 
 --[[

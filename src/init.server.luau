@@ -4,6 +4,7 @@
 	Records what the person at this machine does while editing, and delivers
 	it to the team collector.
 
+	- Stays idle inside playtest sessions, whose changes are thrown away
 	- Builds the status panel before anything that can fail
 	- Refuses to run on a placeholder or insecure collector address
 	- Starts every watcher and reports when none survives
@@ -15,6 +16,9 @@
 ]]
 
 -- // VARIABLES // --
+-- | Services | --
+local RunService = game:GetService("RunService")
+
 -- | Modules | --
 local Config = require(script.Config)
 local StatusUi = require(script.StatusUi)
@@ -64,6 +68,10 @@ end
 
 
 -- // INITIALIZATION // --
+if not RunService:IsEdit() then
+	return
+end
+
 StatusUi.Build(plugin)
 
 local fault = configurationFault()

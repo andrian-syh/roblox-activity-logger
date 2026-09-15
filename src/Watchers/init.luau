@@ -26,6 +26,7 @@ type Watcher = {
 
 -- | Configuration | --
 local WATCHERS: { Watcher } = {
+	require(script.Presence),
 	require(script.Structure),
 	require(script.History),
 	require(script.Editor),

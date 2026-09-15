@@ -8,6 +8,7 @@
 	- Reports undo and redo by the operation they name
 	- Names the transaction in progress for other watchers to use
 	- Proves local authorship, since a transaction is never replicated
+	- Credits a transaction to the assistant or tool its name identifies
 
 	Note: the wording Studio gives an edit is the most readable account of it
 	available anywhere.
@@ -47,7 +48,7 @@ function History.Start()
 			if depth == 0 then
 				EventLog.SetTransaction("")
 			end
-			Authorship.Prove()
+			Authorship.Prove(Authorship.OriginOf(name), name)
 		end)
 	))
 

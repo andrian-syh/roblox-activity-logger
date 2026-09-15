@@ -5,6 +5,7 @@
 	that subject goes quiet.
 
 	- Starts an entry for a subject or extends the one already held
+	- Extends a held entry cheaply, for changes that repeat every frame
 	- Releases entries that have been quiet long enough
 	- Releases one named subject immediately
 	- Discards everything held without releasing it
@@ -19,6 +20,7 @@ export type Entry = { [string]: any }
 
 export type Coalescer = {
 	Add: (self: Coalescer, key: string, create: () -> Entry, update: (Entry) -> ()) -> (),
+	Touch: (self: Coalescer, key: string, update: (Entry) -> ()) -> boolean,
 	Drain: (self: Coalescer, force: boolean?) -> (),
 	Release: (self: Coalescer, key: string) -> (),
 	Clear: (self: Coalescer) -> (),
@@ -68,6 +70,24 @@ function Coalescer:Add(key: string, create: () -> Entry, update: (Entry) -> ())
 
 	entry._clock = os.clock()
 	self._entries[key] = entry
+end
+
+--[[
+	Extends the entry already held for a subject, without building anything
+	when none is held.
+
+	@param key string -- identifies the subject across the burst
+	@param update (Entry) -> () -- folds this change into the held entry
+	@return boolean -- whether an entry was held and extended
+]]
+function Coalescer:Touch(key: string, update: (Entry) -> ()): boolean
+	local held = self._entries[key]
+	if not held then
+		return false
+	end
+	Safe.Call(update, held)
+	held._clock = os.clock()
+	return true
 end
 
 --[[

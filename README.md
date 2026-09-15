@@ -4,7 +4,7 @@ Internal tool. Records what each developer does in Roblox Studio and sends it to
 
 | | |
 |---|---|
-| **Version** | 1.0.0 (`Config.VERSION`) |
+| **Version** | 1.1.0 (`Config.VERSION`). See [CHANGELOG.md](CHANGELOG.md) |
 | **Runs on** | Roblox Studio, edit mode, every team machine |
 | **Stores data in** | Google Sheet, via a Google Apps Script web app |
 | **Audience** | Developers (install), supervisors and PMs (read the sheet), maintainers (build and change) |
@@ -83,7 +83,7 @@ Every column means the same thing on every row. Blank means *not applicable*, ne
 | `userId` | Roblox user ID of the person signed in to Studio |
 | `sessionId` | One Studio session. Changes on every restart |
 | `placeId` / `placeName` | The place being edited |
-| `mode` | `edit` or `run`. Filter out `run` to ignore playtests |
+| `mode` | Always `edit`. The plugin records nothing during a playtest, whose changes are discarded when it stops |
 | `kind` | Event type. See [What is recorded](#what-is-recorded) |
 | `summary` | The row as one readable sentence. **Start here** |
 | `target` | Instance path, script path, or Studio's name for the action |
@@ -96,27 +96,41 @@ Every column means the same thing on every row. Blank means *not applicable*, ne
 | `location` | Line range of a script edit |
 | `preview` | Start of the typed text |
 | `fingerprint` | Short hash shared by rows that describe the same change |
+| `origin` | Who or what made the change: `user`, `assistant`, `tool`, `unattended` or `collaborator`. See below |
 
 ### Who made a change
 
 1. Filter `target` for the instance or script in question.
 2. Sort by `fingerprint`. Rows with the same fingerprint describe one change, seen from different machines.
 3. The author is the machine that reports it as **`authored`**. If several do, the earliest `eventAt` wins.
+4. Read `origin` on that row to see whether a person or software made it.
 
 | `confidence` | Meaning |
 |---|---|
-| `authored` | This machine had local activity around the event. The change started here |
-| `observed` | No local activity nearby. The change probably came from a collaborator |
+| `authored` | The change started on this machine |
+| `observed` | No local activity nearby while collaborators were online. The change probably came from one of them |
 
-`via` names the tool when Studio provides a label, for example `Assistant 12` for the Studio AI assistant. It is often blank. Treat it as a hint, not proof.
+| `origin` | Meaning |
+|---|---|
+| `user` | The person at this machine was active around the change: selecting, typing, undoing, or a Studio edit |
+| `assistant` | Made inside a Studio Assistant recording (`via` starts with `Assistant`), including AI agents connected through Studio MCP |
+| `tool` | Made inside a Rojo patch, or script code kept in step with a file by Studio's Script Sync |
+| `unattended` | Nobody was active on this machine and no collaborator was online, so software on this machine made it: a sync tool without a recording (Azul, Argon), another plugin, or a script |
+| `collaborator` | Nobody was active on this machine while collaborators were online |
+
+`via` names the change recording when Studio provides one, for example `Assistant 12` or `Rojo: Patch 10:42:03`. It is often blank.
 
 ### Signs of a sync tool or AI agent
 
 | Signal | Meaning |
 |---|---|
+| `origin` is `assistant`, `tool` or `unattended` | Software made the change, not the person at the machine |
 | `bulkScriptWrite` row | Many different scripts rewritten within seconds. A person does not edit this way |
-| `scriptSource` row | Code changed while nobody typed in that script: Rojo, Argon, an AI agent, another plugin, or the command bar |
-| `via` starts with `Assistant` | The Studio AI assistant made the change |
+| `scriptSource` row | Code changed while nobody typed in that script |
+
+### Collaborators online
+
+`collaboratorJoined` and `collaboratorLeft` rows show who else was editing, by user ID, and how many were online. Use them to check who could have made an `observed` change.
 
 ### Silent machines
 
@@ -129,7 +143,9 @@ Every hour the collector checks `Heartbeat` and emails `ALERT_EMAIL` about machi
 | `kind` | Recorded when |
 |---|---|
 | `sessionStart` / `sessionEnd` | The plugin loads or unloads |
-| `added` / `removed` | An instance is created or deleted |
+| `added` / `removed` | An instance is created or deleted. A folder or model with contents is one row; `amount` counts the nested instances. Past 50 rows in one operation, the rest are counted in a single extra row |
+| `moved` | An instance, with its contents, changes parent across watched services, by drag or by cut and paste. `oldValue` and `newValue` hold the paths. `oldValue` shows only the service when the old path was never seen |
+| `restored` | A removed instance comes back to the same place, for example by undo |
 | `property` | A property of a **selected** instance changes |
 | `attribute` | An attribute of a **selected** instance changes |
 | `selection` | The user selects something |
@@ -139,6 +155,9 @@ Every hour the collector checks `Heartbeat` and emails `ALERT_EMAIL` about machi
 | `scriptEdit` | The user types in a script. One row per burst of typing |
 | `scriptSource` | Script code changes without typing. One row per script per burst |
 | `bulkScriptWrite` | Many different scripts are rewritten in a short window |
+| `collaboratorJoined` / `collaboratorLeft` | Another person opens or leaves the place. `operation = present` marks people already editing when the plugin started |
+
+A removal is written about 60 seconds late (`CUT_PASTE_WINDOW_SECONDS`). A paste within that window with the same name, class and contents turns the pair into one `moved` row instead of `removed` plus `added`.
 
 Scope:
 
@@ -154,13 +173,16 @@ Scope:
 |---|---|---|
 | Activity while Studio is closed, including Open Cloud writes | The plugin runs only inside Studio | Audit sync tools and API keys separately |
 | Property changes on unselected instances | Watching the whole tree makes Studio unusable | `action`, `added` and `removed` still record the change |
-| Naming a collaborator as the author | No Studio API exposes it | Compare rows across machines by `fingerprint` |
+| Naming a collaborator as the author | No Studio API exposes it; a collaborator's change arrives with no recording or selection | Compare rows across machines by `fingerprint`, and check `collaboratorJoined` rows |
+| A collaborator's change made while the local user is also active | Local activity within a few seconds credits nearby changes to this machine | Compare with the collaborator's own rows by `fingerprint` |
+| Telling Azul or Argon apart from other software | Neither names its changes in a way a plugin can read | `origin = unattended` when working alone |
+| What collaborators have selected | Studio draws their highlights itself; no API exposes them | None |
 | Initial contents of a script created and filled in one step | The watcher attaches after the first write | The `added` row still records the creation |
 | CollectionService tag changes | Needs a known tag list | Add one to `Config` if the team uses tags |
 | Removal of the plugin | A plugin cannot protect itself | `Heartbeat` tab and alert email |
 | A wrong `SHARED_TOKEN` | Apps Script cannot return an error status the plugin can read, so the panel stays green | Confirm rows arrive after every release |
 
-**Unverified:** whether a Team Create collaborator's change looks like local activity on other machines. If it does, `confidence` is less reliable and `fingerprint` becomes the main evidence.
+**Verified:** a Team Create collaborator's change reaches other machines as a plain add or remove, with no recording, undo or selection, so it is never taken for local activity on its own.
 
 ---
 
@@ -198,6 +220,7 @@ Edit [src/Config.luau](src/Config.luau).
 | `FLUSH_INTERVAL_SECONDS`, `QUEUE_CAPACITY`, `BATCH_LIMIT` | Delivery cadence and limits |
 | `*_COALESCE_SECONDS` | How long a burst is folded into one row |
 | `MAX_WATCHED_DESCENDANTS` | Cap on instances watched under the selection |
+| `MAX_STRUCTURE_ROWS_PER_BURST` | Cap on `added` or `removed` rows from one operation. The rest share one counting row |
 
 The plugin refuses to start, and shows red, when `COLLECTOR_URL` or `SHARED_TOKEN` is a placeholder or the URL is not `https`.
 
@@ -240,7 +263,8 @@ src/
   StatusUi.luau        Status panel and toolbar button
   Watchers/
     init.luau          Starts, ticks and stops every watcher
-    Structure.luau     Instances added and removed
+    Presence.luau      Collaborators joining and leaving
+    Structure.luau     Instances added, removed, moved, cut and pasted
     History.luau       Actions, undo and redo
     Editor.luau        Typing in the script editor
     ScriptSource.luau  Code changed without typing, bulk alarm
@@ -253,7 +277,7 @@ build.py               Builder
 
 1. Create a module in `src/Watchers/` exposing `Name` and `Start`, optionally `Tick` and `Stop`.
 2. Record events with `EventLog.Write`. Wrap signal handlers with `Safe.Handler`.
-3. Add the module to `WATCHERS` in `src/Watchers/init.luau`. Order matters: `ScriptSource` depends on `Structure` and `Editor`.
+3. Add the module to `WATCHERS` in `src/Watchers/init.luau`. Order matters: `Presence` starts first so origins are right from the first event, and `ScriptSource` depends on `Structure` and `Editor`.
 4. For a new `kind`, add its sentence to `summaryFor` in `Code.gs`.
 
 A watcher that fails to start is skipped and reported. The others keep running.

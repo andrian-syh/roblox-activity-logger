@@ -5,6 +5,7 @@
 	machine that builds from this source.
 
 	- Names the company and the plugin as they appear in Studio
+	- Lists the change recordings that identify an assistant or a tool
 	- Names the collector and the token sent with each batch
 	- Sets delivery cadence, batch size and retry behaviour
 	- Sets how long each kind of burst is folded before release
@@ -24,7 +25,7 @@ local Config = {}
 	Stamped on every batch so the collector can tell which build a machine is
 	running. Raise it whenever the event shape changes.
 ]]
-Config.VERSION = "1.0.0"
+Config.VERSION = "1.1.0"
 
 -- | Branding | --
 --[[
@@ -36,6 +37,16 @@ Config.PRODUCT_NAME = "Studio Activity Logger"
 Config.DISPLAY_NAME = if Config.COMPANY_TAG == ""
 	then Config.PRODUCT_NAME
 	else string.format("[%s] %s", Config.COMPANY_TAG, Config.PRODUCT_NAME)
+
+-- | Attribution | --
+--[[
+	Change recordings whose name identifies who made the change. Studio's own
+	recordings and any name not listed here count as the local user's work.
+]]
+Config.KNOWN_RECORDINGS = {
+	{ prefix = "Assistant", origin = "assistant" },
+	{ prefix = "Rojo:", origin = "tool" },
+}
 
 -- | Collector | --
 Config.COLLECTOR_URL = "PASTE_COLLECTOR_URL_HERE"
@@ -61,10 +72,12 @@ Config.SOURCE_COALESCE_SECONDS = 5
 Config.SCRIPT_EDIT_COALESCE_SECONDS = 10
 Config.EDITOR_TYPING_WINDOW_SECONDS = 5
 Config.LOCAL_ACTIVITY_WINDOW_SECONDS = 3
+Config.CUT_PASTE_WINDOW_SECONDS = 60
 
 -- | Limits | --
 Config.MAX_WATCHED_DESCENDANTS = 200
 Config.MAX_WATCHED_SCRIPTS = 3000
+Config.MAX_STRUCTURE_ROWS_PER_BURST = 50
 Config.MAX_VALUE_CHARS = 120
 Config.MAX_TARGET_CHARS = 300
 Config.SCRIPT_TEXT_PREVIEW_CHARS = 200
