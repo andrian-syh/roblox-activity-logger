@@ -21,8 +21,8 @@ $TokenPlaceholder = 'PASTE_SHARED_TOKEN_HERE'
 # an exit there would close the whole console.
 function Fail($message) {
     Write-Host ''
-    Write-Host "GAGAL: $message" -ForegroundColor Red
-    throw 'Pemasangan dibatalkan.'
+    Write-Host "FAILED: $message" -ForegroundColor Red
+    throw 'Installation cancelled.'
 }
 
 function Step($message) {
@@ -39,7 +39,7 @@ function XmlEscape($text) {
 # written into, whatever the XML around it says.
 function RejectUnsafe($text, $what) {
     if ($text.Contains('"') -or $text.Contains('\')) {
-        Fail "$what tidak boleh memuat tanda kutip atau garis miring terbalik."
+        Fail "$what must not contain quotes or backslashes."
     }
 }
 
@@ -50,36 +50,36 @@ Write-Host ''
 # A plugin file replaced underneath a running Studio is either locked or simply
 # ignored until the next start, and both look like a successful install.
 if (Get-Process -Name 'RobloxStudio', 'RobloxStudioBeta' -ErrorAction SilentlyContinue) {
-    Fail 'Roblox Studio sedang berjalan. Tutup Studio sepenuhnya, lalu jalankan lagi perintah ini.'
+    Fail 'Roblox Studio is running. Close Studio completely, then run this command again.'
 }
 
 $pluginsDir = Join-Path $env:LOCALAPPDATA 'Roblox\Plugins'
 if (-not (Test-Path $pluginsDir)) {
     New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
-    Step "Folder plugin dibuat: $pluginsDir"
+    Step "Created plugins folder: $pluginsDir"
 }
 
 $target = Join-Path $pluginsDir $PluginFile
 
-$collectorUrl = (Read-Host 'URL collector (diakhiri /exec)').Trim()
-if (-not $collectorUrl) { Fail 'URL collector wajib diisi.' }
+$collectorUrl = (Read-Host 'Collector URL (ends in /exec)').Trim()
+if (-not $collectorUrl) { Fail 'Collector URL is required.' }
 if ($collectorUrl -notmatch '^https://[^\s/]+\.[^\s/]+/.+') {
-    Fail 'URL collector tidak berbentuk alamat https yang utuh. Salin apa adanya dari PM.'
+    Fail 'Collector URL is not a complete https address. Copy it exactly as your supervisor sent it.'
 }
-RejectUnsafe $collectorUrl 'URL collector'
+RejectUnsafe $collectorUrl 'Collector URL'
 
 $tokenSecure = Read-Host 'Shared token' -AsSecureString
 $sharedToken = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($tokenSecure)
 ).Trim()
-if (-not $sharedToken) { Fail 'Shared token wajib diisi.' }
-if ($sharedToken.Length -lt 8) { Fail 'Shared token terlalu pendek untuk benar. Salin apa adanya dari PM.' }
+if (-not $sharedToken) { Fail 'Shared token is required.' }
+if ($sharedToken.Length -lt 8) { Fail 'Shared token is too short to be right. Copy it exactly as your supervisor sent it.' }
 RejectUnsafe $sharedToken 'Shared token'
 
 # Proving the address before writing anything turns a typo into a message here
 # rather than a machine that silently never reports.
 Write-Host ''
-Step 'Memeriksa collector...'
+Step 'Checking the collector...'
 # Apps Script turns away good requests for minutes at a time, so a failed
 # check is tried again before it is believed.
 $check = $null
@@ -91,33 +91,33 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
         break
     } catch {
         if ($attempt -eq 3) {
-            Fail "Collector tidak bisa dihubungi setelah 3 percobaan. $($_.Exception.Message)"
+            Fail "Could not reach the collector after 3 attempts. $($_.Exception.Message)"
         }
-        Step "Collector belum menjawab ($($_.Exception.Message)). Mencoba lagi dalam 10 detik..."
+        Step "No answer from the collector ($($_.Exception.Message)). Retrying in 10 seconds..."
         Start-Sleep -Seconds 10
     }
 }
 if (-not $check.ok) {
-    Fail "Collector menolak: $($check.error). Periksa token, atau minta URL terbaru ke PM."
+    Fail "The collector refused: $($check.error). Check the token, or ask your supervisor for the latest URL."
 }
-Step 'Collector menjawab, token diterima.'
+Step 'Collector reached, token accepted.'
 
-Step 'Mengunduh plugin...'
+Step 'Downloading the plugin...'
 $downloadBase = "https://github.com/$Repository/releases/latest/download"
 $temp = Join-Path ([IO.Path]::GetTempPath()) "$PluginFile.download"
 try {
     Invoke-WebRequest -Uri "$downloadBase/$PluginFile" -OutFile $temp -UseBasicParsing -TimeoutSec 120
     $expected = (Invoke-RestMethod -Uri "$downloadBase/$PluginFile.sha256" -TimeoutSec 60).Trim().Split(' ')[0]
 } catch {
-    Fail "Unduhan gagal. $($_.Exception.Message)"
+    Fail "Download failed. $($_.Exception.Message)"
 }
 
 $actual = (Get-FileHash -Path $temp -Algorithm SHA256).Hash
 if ($actual -ne $expected.ToUpper()) {
     Remove-Item $temp -Force -ErrorAction SilentlyContinue
-    Fail 'Checksum tidak cocok. Unduhan rusak atau berkas rilis diganti. Ulangi, lapor ke PM jika tetap gagal.'
+    Fail 'Checksum mismatch. The download is damaged or the release files were replaced. Try again, and tell your supervisor if it keeps failing.'
 }
-Step 'Checksum cocok.'
+Step 'Checksum verified.'
 
 $content = Get-Content -Path $temp -Raw -Encoding UTF8
 $version = if ($content -match 'Config\.VERSION = "([^"]*)"') { $Matches[1] } else { 'unknown' }
@@ -133,11 +133,11 @@ foreach ($legacy in $LegacyFiles) {
     $stale = Join-Path $pluginsDir $legacy
     if (Test-Path $stale) {
         Remove-Item $stale -Force
-        Step "Versi lama dihapus: $legacy"
+        Step "Removed old copy: $legacy"
     }
 }
 
-Step "Plugin $version dipasang."
+Step "Plugin $version installed."
 
 # Registering here means the supervisor sees the machine straight away, instead
 # of waiting for whenever Studio is next opened.
@@ -174,15 +174,15 @@ try {
     $stored = Invoke-RestMethod -Method Get -TimeoutSec 30 -Uri (
         '{0}?token={1}&batchId={2}' -f $collectorUrl, [uri]::EscapeDataString($sharedToken), $batchId
     )
-    if ($stored.stored) { Step 'Mesin ini terdaftar di sheet.' }
-    else { Step 'Terpasang, tapi pendaftaran belum tercatat. Akan menyusul saat Studio dibuka.' }
+    if ($stored.stored) { Step 'This machine is registered in the sheet.' }
+    else { Step 'Installed. Registration will follow when Studio opens.' }
 } catch {
-    Step 'Terpasang. Pendaftaran akan menyusul saat Studio dibuka.'
+    Step 'Installed. Registration will follow when Studio opens.'
 }
 
 Write-Host ''
-Write-Host 'SELESAI.' -ForegroundColor Green
-Write-Host '  1. Buka Roblox Studio.'
-Write-Host '  2. Panel di bawah harus hijau.'
-Write-Host '  3. Panel merah, baca pesannya dan hubungi PM jika tidak jelas.'
+Write-Host 'DONE.' -ForegroundColor Green
+Write-Host '  1. Open Roblox Studio and find the Studio Activity Logger panel.'
+Write-Host '  2. The Status tile should read Recording, in green.'
+Write-Host '  3. If a Problem card appears, follow what it says. Ask your supervisor if it is unclear.'
 Write-Host ''

@@ -25,7 +25,7 @@ as a new version before the plugin is distributed.
 
 ### Changed
 
-- Every message the plugin shows is in English.
+- Every message the plugin and the installers show is in English. The installer's closing steps describe the new panel.
 - The alert address moves from the `ALERT_EMAIL` constant to `alertEmail` in the `Config` tab, and `SILENT_MINUTES` becomes `windowMinutes` on the `silentMachine` rule.
 
 ### Fixed

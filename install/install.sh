@@ -22,7 +22,7 @@ TOKEN_PLACEHOLDER='PASTE_SHARED_TOKEN_HERE'
 PLUGINS_DIR="$HOME/Documents/Roblox/Plugins"
 
 fail() {
-	printf '\nGAGAL: %s\n' "$1" >&2
+	printf '\nFAILED: %s\n' "$1" >&2
 	exit 1
 }
 
@@ -34,42 +34,42 @@ step() {
 # written into, whatever the XML around it says.
 reject_unsafe() {
 	case "$1" in
-		*'"'*|*'\'*) fail "$2 tidak boleh memuat tanda kutip atau garis miring terbalik." ;;
+		*'"'*|*'\'*) fail "$2 must not contain quotes or backslashes." ;;
 	esac
 }
 
 printf '\nStudio Activity Logger\n\n'
 
 if [ ! -t 0 ]; then
-	fail 'Skrip ini butuh input. Jalankan dengan: bash -c "$(curl -fsSL <url>)"'
+	fail 'This script needs your input. Run it with: bash -c "$(curl -fsSL <url>)"'
 fi
 
 # A plugin file replaced underneath a running Studio is simply ignored until the
 # next start, which looks exactly like a successful install.
 if pgrep -x 'RobloxStudio' >/dev/null 2>&1 || pgrep -x 'RobloxStudioBeta' >/dev/null 2>&1; then
-	fail 'Roblox Studio sedang berjalan. Tutup Studio sepenuhnya, lalu jalankan lagi perintah ini.'
+	fail 'Roblox Studio is running. Close Studio completely, then run this command again.'
 fi
 
 if [ ! -d "$PLUGINS_DIR" ]; then
 	mkdir -p "$PLUGINS_DIR"
-	step "Folder plugin dibuat: $PLUGINS_DIR"
+	step "Created plugins folder: $PLUGINS_DIR"
 fi
 
 TARGET="$PLUGINS_DIR/$PLUGIN_FILE"
 
-printf 'URL collector (diakhiri /exec): '
+printf 'Collector URL (ends in /exec): '
 read -r COLLECTOR_URL
-[ -n "$COLLECTOR_URL" ] || fail 'URL collector wajib diisi.'
+[ -n "$COLLECTOR_URL" ] || fail 'Collector URL is required.'
 if ! printf '%s' "$COLLECTOR_URL" | grep -Eq '^https://[^[:space:]/]+\.[^[:space:]/]+/.+'; then
-	fail 'URL collector tidak berbentuk alamat https yang utuh. Salin apa adanya dari PM.'
+	fail 'Collector URL is not a complete https address. Copy it exactly as your supervisor sent it.'
 fi
-reject_unsafe "$COLLECTOR_URL" 'URL collector'
+reject_unsafe "$COLLECTOR_URL" 'Collector URL'
 
 printf 'Shared token: '
 read -rs SHARED_TOKEN
 printf '\n'
-[ -n "$SHARED_TOKEN" ] || fail 'Shared token wajib diisi.'
-[ "${#SHARED_TOKEN}" -ge 8 ] || fail 'Shared token terlalu pendek untuk benar. Salin apa adanya dari PM.'
+[ -n "$SHARED_TOKEN" ] || fail 'Shared token is required.'
+[ "${#SHARED_TOKEN}" -ge 8 ] || fail 'Shared token is too short to be right. Copy it exactly as your supervisor sent it.'
 reject_unsafe "$SHARED_TOKEN" 'Shared token'
 
 ENCODED_TOKEN="$(printf '%s' "$SHARED_TOKEN" | perl -MURI::Escape -ne 'print uri_escape($_)' 2>/dev/null || printf '%s' "$SHARED_TOKEN")"
@@ -83,7 +83,7 @@ COLLECTOR_CURL=(curl -fsSL -c "$COOKIE_JAR" -b "$COOKIE_JAR")
 # Proving the address before writing anything turns a typo into a message here
 # rather than a machine that silently never reports.
 printf '\n'
-step 'Memeriksa collector...'
+step 'Checking the collector...'
 # Apps Script turns away good requests for minutes at a time, so a failed
 # check is tried again before it is believed.
 for ATTEMPT in 1 2 3; do
@@ -92,30 +92,30 @@ for ATTEMPT in 1 2 3; do
 		*'"ok":'*) break ;;
 	esac
 	if [ "$ATTEMPT" -lt 3 ]; then
-		step 'Collector belum menjawab. Mencoba lagi dalam 10 detik...'
+		step 'No answer from the collector. Retrying in 10 seconds...'
 		sleep 10
 	fi
 done
 case "$CHECK" in
-	*'"ok":true'*) step 'Collector menjawab, token diterima.' ;;
-	*'bad token'*) fail 'Collector menolak token. Periksa token, atau minta yang terbaru ke PM.' ;;
-	*) fail 'Collector tidak bisa dihubungi atau jawabannya tidak dikenali.' ;;
+	*'"ok":true'*) step 'Collector reached, token accepted.' ;;
+	*'bad token'*) fail 'The collector refused the token. Check it, or ask your supervisor for the latest one.' ;;
+	*) fail 'Could not reach the collector, or its answer was not recognised.' ;;
 esac
 
-step 'Mengunduh plugin...'
+step 'Downloading the plugin...'
 DOWNLOAD_BASE="https://github.com/$REPOSITORY/releases/latest/download"
 TEMP="$(mktemp -t StudioActivityLogger)"
 trap 'rm -f "$TEMP" "$COOKIE_JAR"' EXIT
 
-curl -fsSL --max-time 120 -o "$TEMP" "$DOWNLOAD_BASE/$PLUGIN_FILE" || fail 'Unduhan plugin gagal.'
+curl -fsSL --max-time 120 -o "$TEMP" "$DOWNLOAD_BASE/$PLUGIN_FILE" || fail 'Plugin download failed.'
 EXPECTED="$(curl -fsSL --max-time 60 "$DOWNLOAD_BASE/$PLUGIN_FILE.sha256" | awk '{print tolower($1)}')" \
-	|| fail 'Unduhan checksum gagal.'
+	|| fail 'Checksum download failed.'
 ACTUAL="$(shasum -a 256 "$TEMP" | awk '{print tolower($1)}')"
 
 if [ "$ACTUAL" != "$EXPECTED" ]; then
-	fail 'Checksum tidak cocok. Unduhan rusak atau berkas rilis diganti. Ulangi, lapor ke PM jika tetap gagal.'
+	fail 'Checksum mismatch. The download is damaged or the release files were replaced. Try again, and tell your supervisor if it keeps failing.'
 fi
-step 'Checksum cocok.'
+step 'Checksum verified.'
 
 VERSION="$(perl -0777 -ne 'print $1 if /Config\.VERSION = "([^"]*)"/' "$TEMP")"
 VERSION="${VERSION:-unknown}"
@@ -139,11 +139,11 @@ cp "$TEMP" "$TARGET"
 for legacy in "${LEGACY_FILES[@]}"; do
 	if [ -f "$PLUGINS_DIR/$legacy" ]; then
 		rm -f "$PLUGINS_DIR/$legacy"
-		step "Versi lama dihapus: $legacy"
+		step "Removed old copy: $legacy"
 	fi
 done
 
-step "Plugin $VERSION dipasang."
+step "Plugin $VERSION installed."
 
 # Registering here means the supervisor sees the machine straight away, instead
 # of waiting for whenever Studio is next opened.
@@ -168,11 +168,11 @@ PAYLOAD="$(BATCH_ID="$BATCH_ID" SESSION_ID="$SESSION_ID" EPOCH="$EPOCH" MACHINE=
 
 STORED="$("${COLLECTOR_CURL[@]}" --max-time 30 "$COLLECTOR_URL?token=$ENCODED_TOKEN&batchId=$BATCH_ID" 2>/dev/null || true)"
 case "$STORED" in
-	*'"stored":true'*) step 'Mesin ini terdaftar di sheet.' ;;
-	*) step 'Terpasang. Pendaftaran akan menyusul saat Studio dibuka.' ;;
+	*'"stored":true'*) step 'This machine is registered in the sheet.' ;;
+	*) step 'Installed. Registration will follow when Studio opens.' ;;
 esac
 
-printf '\nSELESAI.\n'
-printf '  1. Buka Roblox Studio.\n'
-printf '  2. Panel di bawah harus hijau.\n'
-printf '  3. Panel merah, baca pesannya dan hubungi PM jika tidak jelas.\n\n'
+printf '\nDONE.\n'
+printf '  1. Open Roblox Studio and find the Studio Activity Logger panel.\n'
+printf '  2. The Status tile should read Recording, in green.\n'
+printf '  3. If a Problem card appears, follow what it says. Ask your supervisor if it is unclear.\n\n'

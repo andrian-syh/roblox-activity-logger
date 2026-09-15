@@ -225,9 +225,9 @@ Close Studio before building into the plugins folder: replacing the file reloads
 | `...is still a placeholder...` | Run the installer |
 | `Queue full, N events discarded` | Delivery has failed for a long time. Fix delivery first |
 | `No watcher could start...` | Send the Output log to the maintainer |
-| Installer: `Roblox Studio sedang berjalan` | Close Studio completely and run it again |
-| Installer: `Checksum tidak cocok` | Run it again. Tell the maintainer if it repeats |
-| Installer: `Collector tidak bisa dihubungi` | Apps Script is briefly unavailable. Wait a few minutes and retry |
+| Installer: `Roblox Studio is running` | Close Studio completely and run it again |
+| Installer: `Checksum mismatch` | Run it again. Tell the maintainer if it repeats |
+| Installer: `Could not reach the collector` | Apps Script is briefly unavailable. Wait a few minutes and retry |
 | Panel green, no new rows | `Code.gs` was saved but not redeployed as a new version |
 | No panel or toolbar button | Restart Studio. The file must sit directly in the `Plugins` folder |
 
